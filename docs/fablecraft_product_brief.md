@@ -17,6 +17,7 @@ The product is:
 - AI-extensible via MCP
 - anchored by a public website for download and product communication
 - visually quiet, with soft pink-white paper surfaces and dark ink contrast across desktop and web
+- branded by a simplified dark-ink sideways tree icon on the shared paper surface for desktop app icons and website favicons
 - dark theme uses a neutral charcoal palette rather than a warm brown cast
 - on desktop, cards and panels should feel nearly square, with only slight corner rounding and a shadow-led, architectural treatment rather than soft or pill-like shapes
 
