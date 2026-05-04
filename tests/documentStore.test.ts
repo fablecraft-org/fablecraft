@@ -115,6 +115,34 @@ describe("document store", () => {
     expect(state.snapshot?.revisions).toHaveLength(0);
   });
 
+  it("records save previews without recursively serializing previous revisions", () => {
+    useDocumentStore.getState().hydrateSnapshot(makeDocumentSnapshot());
+
+    useDocumentStore.getState().markSaved({
+      revisionId: "rev-1",
+      savedAtMs: 10,
+    });
+    useDocumentStore.getState().updateSnapshot((snapshot) =>
+      replaceCardContent(snapshot, {
+        cardId: "card-a",
+        contentJson: markdownToContentJson("Second saved change"),
+      }),
+    );
+    useDocumentStore.getState().markSaved({
+      revisionId: "rev-2",
+      savedAtMs: 20,
+    });
+
+    const revisions = useDocumentStore.getState().snapshot?.revisions ?? [];
+    const latestRevision = JSON.parse(revisions[0]?.snapshot ?? "{}");
+
+    expect(revisions).toHaveLength(2);
+    expect(latestRevision.documentId).toBe("doc-1");
+    expect(latestRevision).not.toHaveProperty("summary");
+    expect(latestRevision).not.toHaveProperty("revisions");
+    expect(revisions[0]?.snapshot).not.toContain("rev-1");
+  });
+
   it("clears dirty local edits when an external snapshot arrives mid-edit", () => {
     const initialSnapshot = makeDocumentSnapshot();
     useDocumentStore.getState().hydrateSnapshot(initialSnapshot);

@@ -8,7 +8,7 @@ import {
 import {
   normalizeDocumentSnapshot,
   serializeComparableDocumentSnapshot,
-  serializeDocumentSnapshot,
+  serializeDocumentRevisionSnapshot,
 } from "../domain/document/serialization";
 import type { DocumentSnapshot, SaveDocumentResult } from "../domain/document/types";
 
@@ -170,7 +170,7 @@ export const useDocumentStore = create<DocumentState>((set) => ({
                 {
                   createdAtMs: result.savedAtMs,
                   id: result.revisionId,
-                  snapshot: serializeDocumentSnapshot(state.snapshot),
+                  snapshot: serializeDocumentRevisionSnapshot(state.snapshot),
                 },
                 ...state.snapshot.revisions.filter(
                   (revision) => revision.id !== result.revisionId,

@@ -284,6 +284,7 @@ animation: ~140ms ease-in-out
 - Cmd/Ctrl+S force-flushes dirty changes through the same snapshot persistence path
 - opening or creating another document force-flushes dirty changes before the current document path changes
 - frontend saves target the snapshot's explicit document path so delayed saves cannot drift to a newly opened document
+- revision snapshots are persisted and mirrored in frontend state as editable snapshots only, without summary or prior revision history, so autosave cannot recursively grow revision payloads
 - persistence validation allows multiple root-depth cards, requires at least one root-depth card, and enforces contiguous sibling order per parent including the root group
 - reopen restores state
 - import/export file reads and writes succeed through Tauri commands

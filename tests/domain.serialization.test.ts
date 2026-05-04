@@ -2,6 +2,7 @@ import {
   normalizeDocumentSnapshot,
   serializeComparableDocumentSnapshot,
   serializeDocumentSnapshot,
+  serializeDocumentRevisionSnapshot,
   toEditableDocumentSnapshot,
 } from "../src/domain/document/serialization";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
@@ -59,6 +60,28 @@ describe("document serialization", () => {
     expect(editable.documentId).toBe(snapshot.summary.documentId);
     expect(editable).not.toHaveProperty("summary");
     expect(editable).not.toHaveProperty("revisions");
+  });
+
+  it("serializes revision snapshots without nesting prior revisions", () => {
+    const snapshot = {
+      ...makeDocumentSnapshot(),
+      revisions: [
+        {
+          createdAtMs: 2,
+          id: "revision-existing",
+          snapshot: "{\"large\":\"previous revision\"}",
+        },
+      ],
+    };
+
+    const serialized = serializeDocumentRevisionSnapshot(snapshot);
+    const parsed = JSON.parse(serialized);
+
+    expect(parsed.documentId).toBe(snapshot.summary.documentId);
+    expect(parsed.cards).toHaveLength(snapshot.cards.length);
+    expect(parsed.contents).toHaveLength(snapshot.contents.length);
+    expect(parsed).not.toHaveProperty("summary");
+    expect(parsed).not.toHaveProperty("revisions");
   });
 
   it("handles empty arrays without throwing", () => {

@@ -88,6 +88,10 @@ export function serializeDocumentSnapshot(snapshot: DocumentSnapshot) {
   return JSON.stringify(normalizeDocumentSnapshot(snapshot));
 }
 
+export function serializeDocumentRevisionSnapshot(snapshot: DocumentSnapshot) {
+  return serializeEditableDocumentSnapshot(toEditableDocumentSnapshot(snapshot));
+}
+
 export function serializeComparableDocumentSnapshot(snapshot: DocumentSnapshot) {
   const normalizedSnapshot = normalizeDocumentSnapshot(snapshot);
 
