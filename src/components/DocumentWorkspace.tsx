@@ -785,18 +785,20 @@ export function DocumentWorkspace({
                 selectedCardContent ? (
                   <div
                     data-testid="active-card-shell"
-                    className="absolute flex w-[var(--fc-card-width)] flex-col justify-start border bg-[var(--fc-color-surface)] px-5 py-[10px] transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
+                    className="absolute flex w-[var(--fc-card-width)] flex-col justify-start border bg-[var(--fc-color-card-surface-active)] px-5 py-[10px] transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
                     ref={activeCardShellRef}
                     key={card.cardId}
                     onClick={() => setMode("editing")}
                     role="presentation"
                     style={{
-                      backgroundColor: "var(--fc-color-surface)",
+                      backgroundColor: isEditingSelectedCard
+                        ? "var(--fc-color-card-surface-editing)"
+                        : "var(--fc-color-card-surface-active)",
                       borderColor: "transparent",
                       borderWidth: "0px",
                       boxShadow: isEditingSelectedCard
                         ? "var(--fc-shadow-elevated)"
-                        : "0 18px 34px rgba(23, 20, 18, 0.16)",
+                        : "var(--fc-shadow-card)",
                       left: `calc(50% + ${card.x + stageOffset.x}px)`,
                       minHeight: `${card.height}px`,
                       paddingBottom: `${activeBottomPadding}px`,
@@ -808,7 +810,7 @@ export function DocumentWorkspace({
                       zIndex: 2,
                     }}
                   >
-                    <p className="pointer-events-none absolute right-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:rgba(23,20,18,0.34)]">
+                    <p className="pointer-events-none absolute right-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]">
                       {cardNumbers[selectedCard.id] ?? selectedCard.id.toUpperCase()}
                     </p>
                     <CardEditor

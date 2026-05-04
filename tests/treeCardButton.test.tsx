@@ -231,6 +231,9 @@ describe("TreeCardButton", () => {
     expect(activeCard?.style.borderWidth).toBe("0px");
     expect(activeCard?.style.opacity).toBe("1");
     expect(activeCard?.style.paddingTop).toBe("40px");
+    expect(activeCard?.querySelector("p")?.className).toContain(
+      "text-[var(--fc-color-card-label)]",
+    );
     expect(neighborhoodCard?.style.borderWidth).toBe("0px");
     expect(neighborhoodCard?.style.opacity).toBe("1");
     expect(neighborhoodCard?.style.boxShadow).toBeTruthy();

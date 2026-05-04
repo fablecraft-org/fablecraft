@@ -32,6 +32,7 @@ This brief translates it into **buildable engineering instructions**.
 - Tailwind
 - Centralized UI tokens (spacing, colors, animation)
 - light mode uses a shared soft pink-white paper and dark-ink palette across the website and desktop app
+- dark mode uses neutral charcoal surfaces and cool gray contrast rather than warm brown tokens
 - shadows stay restrained so borders and spacing do most of the visual work
 - desktop cards and panels use only slight corner rounding and rely on shadow hierarchy instead of visible borders
 
@@ -88,7 +89,7 @@ This brief translates it into **buildable engineering instructions**.
 - bounded stage-style workspace
 - full-tree rendering with overflow-hidden clipping
 - fixed viewport with no scrollbars
-- macOS title bar hidden-title transparent chrome synced to the active light/dark background
+- macOS title bar uses overlay chrome with a top drag region; native app/window theme and desktop document shell backgrounds sync to the active light/dark app background
 - border-only mode indication
 
 ### MCP Layer
@@ -252,7 +253,7 @@ animation: ~140ms ease-in-out
 - active card centered
 - workspace stage fills the available window instead of clipping to an internal max width
 - workspace background matches the card surface rather than using a separate tint
-- on macOS, the native title bar hides the app title and matches the active light/dark background instead of showing a separate dark strip
+- on macOS, the native title bar overlays the app content and matches the active light/dark background instead of showing a separate strip
 - no helper text outside cards
 - cards do not resize on selection alone
 - preview cards retain measured height instead of collapsing back to the minimum, and they remeasure when content changes
@@ -263,6 +264,8 @@ animation: ~140ms ease-in-out
 - cards use shadow rather than visible borders
 - navigation focus is conveyed by a darker shadow on the selected card
 - editing mode deepens the selected card shadow further so it feels elevated
+- dark theme card shadows are disabled; card visibility comes from lighter card-surface tokens, with an even lighter editing surface
+- card number labels use a theme token with a lighter dark-mode value
 - neighborhood cards keep full text contrast and a soft shadow
 - non-neighborhood cards keep the same text and surface color, but render without shadow emphasis
 - immediate parent aligns with the active card
@@ -295,6 +298,8 @@ animation: ~140ms ease-in-out
 
 ### Notices
 - transient notices auto-dismiss
+- notices render in the top-right corner as compact square-edged cards using inverse theme tokens
+- dark theme notice surfaces match the selected-card surface token
 - repeated external reload polling must not keep a notice alive when the document contents are unchanged
 - document clock metadata churn alone must not trigger an external reload notice
 - revision-only save churn must not trigger an external reload notice

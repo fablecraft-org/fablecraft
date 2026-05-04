@@ -1,18 +1,21 @@
+import { setTheme as setAppTheme } from "@tauri-apps/api/app";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow, type Color, type TitleBarStyle } from "@tauri-apps/api/window";
-import { themeSurfaceColor, type UiTheme } from "../styles/tokens";
+import { themeAppColor, type UiTheme } from "../styles/tokens";
 
 interface NativeWindowAppearance {
+  appTheme: UiTheme;
   backgroundColor: Color;
   theme: UiTheme;
   titleBarStyle: TitleBarStyle;
 }
 
-const MAC_TITLE_BAR_STYLE: TitleBarStyle = "transparent";
+const MAC_TITLE_BAR_STYLE: TitleBarStyle = "overlay";
 
 export function resolveNativeWindowAppearance(theme: UiTheme): NativeWindowAppearance {
   return {
-    backgroundColor: hexColorToRgb(themeSurfaceColor(theme)),
+    appTheme: theme,
+    backgroundColor: hexColorToRgb(themeAppColor(theme)),
     theme,
     titleBarStyle: MAC_TITLE_BAR_STYLE,
   };
@@ -26,6 +29,7 @@ export async function syncNativeWindowAppearance(theme: UiTheme) {
   const appearance = resolveNativeWindowAppearance(theme);
   const currentWindow = getCurrentWindow();
   const operations: Array<Promise<void>> = [
+    setAppTheme(appearance.appTheme),
     currentWindow.setBackgroundColor(appearance.backgroundColor),
     currentWindow.setTheme(appearance.theme),
   ];

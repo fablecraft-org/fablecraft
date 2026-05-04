@@ -173,7 +173,9 @@ describe("DocumentWorkspace", () => {
     expect(navigationShell?.textContent).toContain("A01");
 
     const navigationStyle = {
+      backgroundColor: navigationShell?.style.backgroundColor,
       borderWidth: navigationShell?.style.borderWidth,
+      boxShadow: navigationShell?.style.boxShadow,
       minHeight: navigationShell?.style.minHeight,
       paddingBottom: navigationShell?.style.paddingBottom,
       paddingLeft: navigationShell?.style.paddingLeft,
@@ -196,13 +198,27 @@ describe("DocumentWorkspace", () => {
     expect(editingEditor?.dataset.editing).toBe("true");
     expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(2);
     expect({
-      borderWidth: editingShell?.style.borderWidth,
       minHeight: editingShell?.style.minHeight,
       paddingBottom: editingShell?.style.paddingBottom,
       paddingLeft: editingShell?.style.paddingLeft,
       paddingRight: editingShell?.style.paddingRight,
       paddingTop: editingShell?.style.paddingTop,
-    }).toEqual(navigationStyle);
+    }).toEqual({
+      minHeight: navigationStyle.minHeight,
+      paddingBottom: navigationStyle.paddingBottom,
+      paddingLeft: navigationStyle.paddingLeft,
+      paddingRight: navigationStyle.paddingRight,
+      paddingTop: navigationStyle.paddingTop,
+    });
+    expect(navigationStyle.backgroundColor).toBe(
+      "var(--fc-color-card-surface-active)",
+    );
+    expect(navigationStyle.boxShadow).toBe("var(--fc-shadow-card)");
+    expect(editingShell?.style.backgroundColor).toBe(
+      "var(--fc-color-card-surface-editing)",
+    );
+    expect(editingShell?.style.borderWidth).toBe(navigationStyle.borderWidth);
+    expect(editingShell?.style.boxShadow).toBe("var(--fc-shadow-elevated)");
     expect(editingShell?.style.paddingTop).toBe("40px");
     expect(Array.from(container.querySelectorAll('[data-testid="tree-card"]')).map((node) =>
       (node as HTMLDivElement).dataset.cardLabel,

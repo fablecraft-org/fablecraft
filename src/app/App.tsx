@@ -836,6 +836,10 @@ export function App() {
   return (
     <main className="h-screen overflow-hidden bg-[var(--fc-color-app)] text-[var(--fc-color-text)] antialiased">
       <div
+        className="fixed inset-x-0 top-0 z-20 h-8"
+        data-tauri-drag-region
+      />
+      <div
         className={
           screen === "workspace"
             ? "flex h-full w-full items-stretch"
@@ -924,7 +928,11 @@ export function App() {
       )}
 
       {notice && (
-        <div className="pointer-events-none fixed bottom-14 left-1/2 z-50 w-[min(90vw,720px)] -translate-x-1/2 bg-[var(--fc-color-surface)] px-5 py-3 text-sm text-[var(--fc-color-text)] shadow-[var(--fc-shadow-elevated)]">
+        <div
+          aria-live={notice.tone === "error" ? "assertive" : "polite"}
+          className="pointer-events-none fixed right-4 top-4 z-50 w-[min(calc(100vw-2rem),360px)] border border-[var(--fc-color-notice-border)] bg-[var(--fc-color-notice-surface)] px-5 py-4 font-[var(--fc-font-ui)] text-sm leading-6 text-[var(--fc-color-notice-text)] shadow-[var(--fc-shadow-elevated)] sm:right-6 sm:top-6"
+          role={notice.tone === "error" ? "alert" : "status"}
+        >
           {notice.message}
         </div>
       )}

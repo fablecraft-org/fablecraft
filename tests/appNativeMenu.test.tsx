@@ -193,6 +193,39 @@ describe("App native menu handling", () => {
     });
   });
 
+  it("renders notices as inverse-color cards in the top right", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useAppStore.setState({
+      activeDocument: null,
+      mode: "navigation",
+      notice: {
+        message: "Saved the document.",
+        tone: "info",
+      },
+      screen: "startup",
+    });
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    const notice = container.querySelector('[role="status"]');
+
+    expect(notice?.textContent).toBe("Saved the document.");
+    expect(notice?.className).toContain("right-4");
+    expect(notice?.className).toContain("top-4");
+    expect(notice?.className).toContain("bg-[var(--fc-color-notice-surface)]");
+    expect(notice?.className).toContain("text-[var(--fc-color-notice-text)]");
+    expect(notice?.className).not.toContain("rounded");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("force saves when Cmd+S is pressed", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

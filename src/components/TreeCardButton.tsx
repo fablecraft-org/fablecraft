@@ -35,6 +35,9 @@ export function TreeCardButton({
     : isNeighborhood
       ? "var(--fc-shadow-soft)"
       : "none";
+  const renderedSurface = isActive
+    ? "var(--fc-color-card-surface-active)"
+    : "var(--fc-color-card-surface)";
 
   useEffect(() => {
     const buttonElement = buttonRef.current;
@@ -64,13 +67,14 @@ export function TreeCardButton({
 
   return (
     <div
-      className="absolute flex min-h-[var(--fc-card-height)] w-[var(--fc-card-width)] cursor-pointer flex-col justify-start border bg-[var(--fc-color-surface)] px-5 py-[10px] text-left transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
+      className="absolute flex min-h-[var(--fc-card-height)] w-[var(--fc-card-width)] cursor-pointer flex-col justify-start border bg-[var(--fc-color-card-surface)] px-5 py-[10px] text-left transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
       onClick={onClick}
       ref={buttonRef}
       style={{
         borderColor: "transparent",
         borderWidth: "0px",
         boxShadow: renderedShadow,
+        backgroundColor: renderedSurface,
         left: `calc(50% + ${x}px)`,
         opacity: "1",
         paddingBottom: `${bottomPadding}px`,
@@ -83,7 +87,7 @@ export function TreeCardButton({
       } as CSSProperties}
     >
       {cardLabel ? (
-        <p className="pointer-events-none absolute right-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:rgba(23,20,18,0.34)]">
+        <p className="pointer-events-none absolute right-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]">
           {cardLabel}
         </p>
       ) : null}

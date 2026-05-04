@@ -21,18 +21,6 @@ if (documents.length !== 1) {
 }
 
 const document = documents[0];
-const layers = query(
-  "select id, document_id, name, description, layer_index, color, is_base from layers order by layer_index;",
-).map((layer) => ({
-  color: layer.color,
-  description: layer.description,
-  documentId: layer.document_id,
-  id: layer.id,
-  isBase: Boolean(layer.is_base),
-  layerIndex: layer.layer_index,
-  name: layer.name,
-}));
-
 const cards = query(
   "select id, document_id, parent_id, order_index, type from cards order by coalesce(parent_id, ''), order_index;",
 ).map((card) => ({
@@ -44,22 +32,19 @@ const cards = query(
 }));
 
 const contents = query(
-  "select card_id, layer_id, content_json from card_content order by card_id, layer_id;",
+  "select card_id, content_json from card_content order by card_id;",
 ).map((content) => ({
   cardId: content.card_id,
   contentJson: content.content_json,
-  layerId: content.layer_id,
 }));
 
 const snapshot = {
   summary: {
     documentId: document.id,
-    layerCount: layers.length,
     name: "tutorial",
     openedAtMs: document.updated_at_ms,
     path: "/demo/tutorial.fable",
   },
-  layers,
   cards,
   contents,
   revisions: [],

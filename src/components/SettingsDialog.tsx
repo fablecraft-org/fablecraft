@@ -2,6 +2,7 @@ import {
   Fragment,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
@@ -18,6 +19,7 @@ function SettingGroup<T extends string>({
   options,
   onChange,
   onFocusNext,
+  onFocused,
   onFocusPrevious,
   rowRef,
   value,
@@ -30,6 +32,7 @@ function SettingGroup<T extends string>({
     value: T;
   }>;
   onFocusNext: () => void;
+  onFocused: () => void;
   onFocusPrevious: () => void;
   rowRef: (element: HTMLDivElement | null) => void;
   value: T;
@@ -87,6 +90,7 @@ function SettingGroup<T extends string>({
       onClickCapture={(event) => {
         (event.currentTarget as HTMLDivElement).focus();
       }}
+      onFocus={onFocused}
       onKeyDown={handleRowKeyDown}
       ref={rowRef}
       tabIndex={0}
@@ -163,6 +167,7 @@ function SettingGroup<T extends string>({
 }
 
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
+  const activeRowIndexRef = useRef(0);
   const rowRefs = useRef<Array<HTMLDivElement | null>>([]);
   const preferences = useSettingsStore((state) => state.preferences);
   const resetPreferences = useSettingsStore((state) => state.resetPreferences);
@@ -175,6 +180,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
   function focusRow(index: number) {
     const nextIndex = (index + 6) % 6;
+    activeRowIndexRef.current = nextIndex;
     rowRefs.current[nextIndex]?.focus();
   }
 
@@ -182,10 +188,21 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     rowRefs.current[0]?.focus();
   }, []);
 
+  useLayoutEffect(() => {
+    rowRefs.current[activeRowIndexRef.current]?.focus();
+  }, [preferences]);
+
   return (
     <OverlayShell
       footer="These controls update the global UI tokens immediately for the current machine."
       onPanelKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          return;
+        }
+
         event.stopPropagation();
       }}
       title="Settings"
@@ -196,6 +213,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           id="theme"
           label="Theme"
           onChange={setTheme}
+          onFocused={() => {
+            activeRowIndexRef.current = 0;
+          }}
           onFocusNext={() => focusRow(1)}
           onFocusPrevious={() => focusRow(-1)}
           options={[
@@ -211,6 +231,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           id="font"
           label="Font"
           onChange={setFont}
+          onFocused={() => {
+            activeRowIndexRef.current = 1;
+          }}
           onFocusNext={() => focusRow(2)}
           onFocusPrevious={() => focusRow(0)}
           options={[
@@ -226,6 +249,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           id="text-size"
           label="Text Size"
           onChange={setTextSize}
+          onFocused={() => {
+            activeRowIndexRef.current = 2;
+          }}
           onFocusNext={() => focusRow(3)}
           onFocusPrevious={() => focusRow(1)}
           options={[
@@ -241,6 +267,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           id="line-height"
           label="Line Height"
           onChange={setLineHeight}
+          onFocused={() => {
+            activeRowIndexRef.current = 3;
+          }}
           onFocusNext={() => focusRow(4)}
           onFocusPrevious={() => focusRow(2)}
           options={[
@@ -256,6 +285,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           id="card-width"
           label="Card Width"
           onChange={setCardWidth}
+          onFocused={() => {
+            activeRowIndexRef.current = 4;
+          }}
           onFocusNext={() => focusRow(5)}
           onFocusPrevious={() => focusRow(3)}
           options={[
@@ -271,6 +303,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           id="scroll-pan"
           label="Trackpad Pan"
           onChange={setScrollPan}
+          onFocused={() => {
+            activeRowIndexRef.current = 5;
+          }}
           onFocusNext={() => focusRow(0)}
           onFocusPrevious={() => focusRow(4)}
           options={[

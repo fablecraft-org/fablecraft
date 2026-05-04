@@ -5,6 +5,10 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:app:allow-set-app-theme",
+    "core:window:allow-set-background-color",
+    "core:window:allow-set-theme",
+    "core:window:allow-set-title-bar-style",
     "dialog:allow-open",
     "dialog:allow-save",
     "process:allow-restart",

@@ -30,6 +30,64 @@ describe("settings persistence", () => {
     expect(parsed.scrollPan).toBe("disabled");
   });
 
+  it("applies inverse theme variables for notice cards", () => {
+    useSettingsStore.getState().setTheme("light");
+
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-notice-surface"),
+    ).toBe("#18191b");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-notice-text"),
+    ).toBe("#f4f4f1");
+
+    useSettingsStore.getState().setTheme("dark");
+
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-notice-surface"),
+    ).toBe("#2d3035");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-notice-text"),
+    ).toBe("#f4f4f1");
+  });
+
+  it("uses lighter card surfaces without shadows in dark theme", () => {
+    useSettingsStore.getState().setTheme("dark");
+
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-shadow-card"),
+    ).toBe("none");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-shadow-elevated"),
+    ).toBe("none");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-shadow-soft"),
+    ).toBe("none");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-card-surface"),
+    ).toBe("#24262a");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-card-surface-active"),
+    ).toBe("#2d3035");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-card-surface-editing"),
+    ).toBe("#373b41");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-card-label"),
+    ).toBe("rgba(244, 244, 241, 0.68)");
+
+    useSettingsStore.getState().setTheme("light");
+
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-shadow-card"),
+    ).toContain("rgba(23, 20, 18");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-card-surface"),
+    ).toBe("#fdf6ef");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-card-label"),
+    ).toBe("rgba(23, 20, 18, 0.34)");
+  });
+
   it("restores stored preferences on a fresh load", () => {
     useSettingsStore.getState().setTheme("dark");
     useSettingsStore.getState().setCardWidth("wide");

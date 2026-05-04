@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsDialog } from "../src/components/SettingsDialog";
 import { useSettingsStore } from "../src/state/settingsStore";
 
@@ -120,6 +120,60 @@ describe("SettingsDialog", () => {
     });
 
     expect(document.activeElement).toBe(fontRow);
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("keeps keyboard focus after changing theme with a click", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onClose = vi.fn();
+
+    act(() => {
+      root.render(<SettingsDialog onClose={onClose} />);
+    });
+
+    const themeRow = container.querySelector(
+      '[data-testid="setting-row-theme"]',
+    ) as HTMLDivElement | null;
+    const fontRow = container.querySelector(
+      '[data-testid="setting-row-font"]',
+    ) as HTMLDivElement | null;
+    const darkButton = Array.from(themeRow?.querySelectorAll("button") ?? []).find(
+      (button) => button.textContent?.includes("Dark"),
+    ) as HTMLButtonElement | undefined;
+
+    act(() => {
+      darkButton?.click();
+    });
+
+    expect(useSettingsStore.getState().preferences.theme).toBe("dark");
+    expect(document.activeElement).toBe(themeRow);
+
+    act(() => {
+      themeRow?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowDown",
+        }),
+      );
+    });
+
+    expect(document.activeElement).toBe(fontRow);
+
+    act(() => {
+      fontRow?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Escape",
+        }),
+      );
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
 
     act(() => {
       root.unmount();

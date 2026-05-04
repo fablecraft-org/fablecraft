@@ -4,17 +4,19 @@ import { resolveNativeWindowAppearance } from "../src/lib/nativeWindowAppearance
 describe("resolveNativeWindowAppearance", () => {
   it("matches the light theme exactly to the card background", () => {
     expect(resolveNativeWindowAppearance("light")).toEqual({
+      appTheme: "light",
       backgroundColor: [253, 246, 239],
       theme: "light",
-      titleBarStyle: "transparent",
+      titleBarStyle: "overlay",
     });
   });
 
   it("matches the dark theme exactly to the card background", () => {
     expect(resolveNativeWindowAppearance("dark")).toEqual({
-      backgroundColor: [33, 29, 26],
+      appTheme: "dark",
+      backgroundColor: [24, 25, 27],
       theme: "dark",
-      titleBarStyle: "transparent",
+      titleBarStyle: "overlay",
     });
   });
 });

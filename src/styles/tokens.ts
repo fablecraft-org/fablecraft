@@ -19,34 +19,64 @@ const themeTokens = {
     app: "#fdf6ef",
     border: "#a2978b",
     borderStrong: "#171412",
-    focus: "#2a2521",
+    cardLabel: "rgba(23, 20, 18, 0.34)",
+    cardSurface: "#fdf6ef",
+    cardSurfaceActive: "#fdf6ef",
+    cardSurfaceEditing: "#fdf6ef",
+    focus: "#24262a",
     muted: "#756c64",
+    noticeBorder: "rgba(245, 238, 229, 0.18)",
+    noticeSurface: "#18191b",
+    noticeText: "#f4f4f1",
     onDark: "#fff7f1",
     overlayBackdrop: "rgba(245, 236, 230, 0.82)",
+    shadowCard: "0 12px 28px rgba(23, 20, 18, 0.08)",
+    shadowElevated: "0 18px 40px rgba(23, 20, 18, 0.14)",
+    shadowSoft: "0 8px 18px rgba(23, 20, 18, 0.08)",
     surface: "#fdf6ef",
     surfaceStrong: "#fffaf6",
     text: "#171412",
   },
   dark: {
-    app: "#211d1a",
-    border: "#756b61",
-    borderStrong: "#f5eee5",
-    focus: "#f5eee5",
-    muted: "#bdb2a6",
-    onDark: "#171412",
-    overlayBackdrop: "rgba(16, 13, 11, 0.72)",
-    surface: "#211d1a",
-    surfaceStrong: "#2a2521",
-    text: "#f5eee5",
+    app: "#18191b",
+    border: "#6f7379",
+    borderStrong: "#f4f4f1",
+    cardLabel: "rgba(244, 244, 241, 0.68)",
+    cardSurface: "#24262a",
+    cardSurfaceActive: "#2d3035",
+    cardSurfaceEditing: "#373b41",
+    focus: "#f4f4f1",
+    muted: "#b7bbc1",
+    noticeBorder: "rgba(24, 25, 27, 0.14)",
+    noticeSurface: "#2d3035",
+    noticeText: "#f4f4f1",
+    onDark: "#18191b",
+    overlayBackdrop: "rgba(12, 13, 15, 0.72)",
+    shadowCard: "none",
+    shadowElevated: "none",
+    shadowSoft: "none",
+    surface: "#18191b",
+    surfaceStrong: "#24262a",
+    text: "#f4f4f1",
   },
 } satisfies Record<UiTheme, {
   app: string;
   border: string;
   borderStrong: string;
+  cardLabel: string;
+  cardSurface: string;
+  cardSurfaceActive: string;
+  cardSurfaceEditing: string;
   focus: string;
   muted: string;
+  noticeBorder: string;
+  noticeSurface: string;
+  noticeText: string;
   onDark: string;
   overlayBackdrop: string;
+  shadowCard: string;
+  shadowElevated: string;
+  shadowSoft: string;
   surface: string;
   surfaceStrong: string;
   text: string;
@@ -54,6 +84,10 @@ const themeTokens = {
 
 export function themeSurfaceColor(theme: UiTheme) {
   return themeTokens[theme].surface;
+}
+
+export function themeAppColor(theme: UiTheme) {
+  return themeTokens[theme].app;
 }
 
 const fontTokens = {
@@ -98,11 +132,6 @@ const uiTokens = {
   radius: {
     card: 6,
     pill: 999,
-  },
-  shadows: {
-    card: "0 12px 28px rgba(23, 20, 18, 0.08)",
-    elevated: "0 18px 40px rgba(23, 20, 18, 0.14)",
-    soft: "0 8px 18px rgba(23, 20, 18, 0.08)",
   },
   spacing: 24,
 };
@@ -177,8 +206,15 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-color-app": theme.app,
     "--fc-color-border": theme.border,
     "--fc-color-border-strong": theme.borderStrong,
+    "--fc-color-card-label": theme.cardLabel,
+    "--fc-color-card-surface": theme.cardSurface,
+    "--fc-color-card-surface-active": theme.cardSurfaceActive,
+    "--fc-color-card-surface-editing": theme.cardSurfaceEditing,
     "--fc-color-focus": theme.focus,
     "--fc-color-muted": theme.muted,
+    "--fc-color-notice-border": theme.noticeBorder,
+    "--fc-color-notice-surface": theme.noticeSurface,
+    "--fc-color-notice-text": theme.noticeText,
     "--fc-color-on-dark": theme.onDark,
     "--fc-color-overlay-backdrop": theme.overlayBackdrop,
     "--fc-color-surface": theme.surface,
@@ -190,9 +226,9 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-font-ui": fonts.ui,
     "--fc-radius-card": `${uiTokens.radius.card}px`,
     "--fc-radius-pill": `${uiTokens.radius.pill}px`,
-    "--fc-shadow-card": uiTokens.shadows.card,
-    "--fc-shadow-elevated": uiTokens.shadows.elevated,
-    "--fc-shadow-soft": uiTokens.shadows.soft,
+    "--fc-shadow-card": theme.shadowCard,
+    "--fc-shadow-elevated": theme.shadowElevated,
+    "--fc-shadow-soft": theme.shadowSoft,
     "--fc-spacing": `${uiTokens.spacing}px`,
   };
 }

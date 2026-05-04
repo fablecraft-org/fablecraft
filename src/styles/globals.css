@@ -16,12 +16,13 @@ body,
 
 body {
   margin: 0;
-  background: var(--fc-color-surface, #fdf6ef);
+  background: var(--fc-color-app, #fdf6ef);
 }
 
 html[data-fc-runtime="desktop"],
 body[data-fc-runtime="desktop"],
 body[data-fc-runtime="desktop"] #root {
+  background: var(--fc-color-app, #fdf6ef);
   height: 100%;
   overflow: hidden;
 }

@@ -17,6 +17,7 @@ The product is:
 - AI-extensible via MCP
 - anchored by a public website for download and product communication
 - visually quiet, with soft pink-white paper surfaces and dark ink contrast across desktop and web
+- dark theme uses a neutral charcoal palette rather than a warm brown cast
 - on desktop, cards and panels should feel nearly square, with only slight corner rounding and a shadow-led, architectural treatment rather than soft or pill-like shapes
 
 ### 1.1 Product Surfaces
@@ -171,7 +172,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 
 - workspace renders as a bounded stage that fills the window
 - stage background matches the card surface exactly
-- on macOS, the native title bar hides the Fablecraft title and uses the same light/dark background as the workspace
+- on macOS, the native traffic-light title bar overlays the app content so it uses the exact same light/dark background as the workspace
 - Active card: centered
 - Parents: left-middle column
 - Children: right column
@@ -179,6 +180,8 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - all cards remain rendered in the stage unless they are off-screen
 - cards in the active neighborhood use a slightly lighter border when not selected
 - cards outside the active neighborhood keep the same text and surface color, but lose shadow emphasis
+- dark theme cards use lighter box surfaces instead of shadows; the selected editing card becomes lighter again
+- dark theme card number labels use a light token so labels such as `A01` remain visible
 - immediate parent aligns vertically with the active card
 - the first immediate child is vertically centered on the active card, and later children stack below it even when other child groups share that column
 - anchoring the active child group must not reorder neighboring sibling subtrees in that same child column
@@ -452,6 +455,12 @@ Rules:
 - structured errors
 - payload limits enforced
 - mutation responses return lightweight status payloads rather than full document snapshots
+
+### Notices
+
+- transient notices appear in the top-right corner as compact square-edged card surfaces
+- notice cards use inverse theme colors: dark card in light theme, light card in dark theme
+- in dark theme, notice cards use the selected-card surface color
 
 ---
 
