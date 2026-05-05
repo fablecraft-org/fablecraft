@@ -32,7 +32,7 @@ This brief translates it into **buildable engineering instructions**.
 - Tailwind
 - Centralized UI tokens (spacing, colors, animation)
 - light mode uses a shared soft pink-white paper and dark-ink palette across the website and desktop app
-- desktop app icons live in `src-tauri/icons`; website favicon and web app manifest icons live in `public`
+- desktop app icons live in `src-tauri/icons` and must be listed in `src-tauri/tauri.conf.json` under `bundle.icon`; website favicon and web app manifest icons live in `public`
 - dark mode uses neutral charcoal surfaces and cool gray contrast rather than warm brown tokens
 - shadows stay restrained so borders and spacing do most of the visual work
 - desktop cards and panels use only slight corner rounding and rely on shadow hierarchy instead of visible borders
