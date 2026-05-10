@@ -84,7 +84,7 @@ Cards do NOT have titles.
 
 ## 3. Card Lifecycle
 
-- New cards start empty
+- New cards start as a single empty level-one heading line with no trailing body line
 - Empty cards cannot create additional cards
 - If abandoned empty → removed
 - The only card that must never be removed is the final remaining card in the whole tree; deletion of that card clears its content instead.
@@ -140,9 +140,10 @@ Up/down follows the packed spatial column, even across different parent groups. 
 
 ### Creation
 
-- Cmd/Ctrl+Up / Down → siblings
-- Cmd/Ctrl+Right → child
-- Cmd/Ctrl+Left → wrap the current level in a new parent
+- In navigation mode, Tab+Up / Down → siblings
+- In navigation mode, Tab+Right → child
+- In navigation mode, Tab+Left → wrap the current level in a new parent
+- New cards start as a single empty level-one heading line with no trailing body line
 
 ### Editing
 
@@ -152,13 +153,17 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - Escape on an empty child card → delete the empty card and return to its parent in navigation mode
 - Backspace on an empty card → delete card
 - Backspace on an empty child card → delete the empty card and return to its parent in editing mode
+- Backspace from a trailing empty line removes that line immediately and returns to the previous line
 - ArrowDown at the end of a card opens the card below in edit mode at the start of that card
 - ArrowUp at the start of a card opens the card above in edit mode at the end of that card
 - ArrowRight at the end of a card opens the first child in edit mode at the start of that card
-- Tab+Arrow keys move between nearby cards, place the caret at the end of the destination card, and stay in edit mode
+- In editing mode, Tab+Arrow keys move between nearby cards, place the caret at the end of the destination card, and stay in edit mode
+- In editing mode, Tab+Arrow keys create a card in the pointed direction when no nearby destination card exists
+- Enter in an empty new-card heading converts the single heading line to regular body text instead of creating another card
 - Double Enter → new card below
 - Tab+Enter → split at line
 - markdown shortcuts render into rich text, including visible headings and lists
+- leaving a card removes any trailing empty line from that card
 - unselected cards preserve that rich structure in preview mode
 
 ---
@@ -174,6 +179,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - workspace renders as a bounded stage that fills the window
 - stage background matches the card surface exactly
 - on macOS, the native traffic-light title bar overlays the app content so it uses the exact same light/dark background as the workspace
+- the top drag region spans the upper 128px of the window so the overlay title area is easy to grab
 - Active card: centered
 - Parents: left-middle column
 - Children: right column
@@ -387,6 +393,7 @@ Includes:
 - card width
 - row-based inline controls instead of native selectors
 - keyboard navigation is preserved: Up/Down move between setting rows, Left/Right change the current row
+- the active row remains selected after immediate preference changes such as switching between light and dark themes
 - while settings is open, those keys should not move the tree in the background
 - settings panel stays inside the window and scrolls internally when needed
 - changes apply immediately through centralized tokens

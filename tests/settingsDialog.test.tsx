@@ -38,7 +38,9 @@ describe("SettingsDialog", () => {
     });
 
     expect(container.querySelectorAll("select")).toHaveLength(0);
-    expect(container.querySelectorAll('[data-testid^="setting-row-"]')).toHaveLength(6);
+    expect(container.querySelectorAll('section[data-testid^="setting-row-"]')).toHaveLength(
+      6,
+    );
     expect(container.textContent).toContain("Text Size");
     expect(container.textContent).toContain("Light");
     expect(container.textContent).toContain("Dark");
@@ -92,10 +94,14 @@ describe("SettingsDialog", () => {
     const fontRow = container.querySelector(
       '[data-testid="setting-row-font"]',
     ) as HTMLDivElement | null;
+    const themeChevron = container.querySelector(
+      '[data-testid="setting-row-theme-chevron"]',
+    ) as HTMLElement | null;
 
     expect(themeRow).toBeDefined();
     expect(fontRow).toBeDefined();
     expect(useSettingsStore.getState().preferences.theme).toBe("light");
+    expect(themeChevron?.style.opacity).toBe("1");
 
     act(() => {
       themeRow?.focus();
@@ -109,6 +115,9 @@ describe("SettingsDialog", () => {
 
     expect(useSettingsStore.getState().preferences.theme).toBe("dark");
     expect(themeRow?.textContent).toContain("Dark");
+    expect(themeRow?.dataset.active).toBe("true");
+    expect(themeChevron?.style.opacity).toBe("1");
+    expect(document.activeElement).toBe(themeRow);
 
     act(() => {
       themeRow?.dispatchEvent(
@@ -120,6 +129,7 @@ describe("SettingsDialog", () => {
     });
 
     expect(document.activeElement).toBe(fontRow);
+    expect(themeRow?.dataset.active).toBe("false");
 
     act(() => {
       root.unmount();
@@ -142,6 +152,9 @@ describe("SettingsDialog", () => {
     const fontRow = container.querySelector(
       '[data-testid="setting-row-font"]',
     ) as HTMLDivElement | null;
+    const themeChevron = container.querySelector(
+      '[data-testid="setting-row-theme-chevron"]',
+    ) as HTMLElement | null;
     const darkButton = Array.from(themeRow?.querySelectorAll("button") ?? []).find(
       (button) => button.textContent?.includes("Dark"),
     ) as HTMLButtonElement | undefined;
@@ -152,6 +165,8 @@ describe("SettingsDialog", () => {
 
     expect(useSettingsStore.getState().preferences.theme).toBe("dark");
     expect(document.activeElement).toBe(themeRow);
+    expect(themeRow?.dataset.active).toBe("true");
+    expect(themeChevron?.style.opacity).toBe("1");
 
     act(() => {
       themeRow?.dispatchEvent(

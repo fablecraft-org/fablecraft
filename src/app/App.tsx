@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { promptForNewDocument, promptForOpenDocument } from "./documentActions";
 import { exportCurrentLevelToFile, importMarkdownDocument } from "./importExportActions";
 import { AppUpdateDialog } from "../components/AppUpdateDialog";
@@ -813,6 +815,17 @@ export function App() {
     },
   ];
 
+  function handleWindowDragMouseDown(event: MouseEvent<HTMLDivElement>) {
+    if (event.button !== 0 || !isTauri()) {
+      return;
+    }
+
+    event.preventDefault();
+    void getCurrentWindow().startDragging().catch((error: unknown) => {
+      console.warn("Fablecraft could not start window dragging.", error);
+    });
+  }
+
   if (activeSnapshot) {
     if (selectedCard && canMergeWithAbove) {
       commandItems.push({
@@ -836,8 +849,9 @@ export function App() {
   return (
     <main className="h-screen overflow-hidden bg-[var(--fc-color-app)] text-[var(--fc-color-text)] antialiased">
       <div
-        className="fixed inset-x-0 top-0 z-20 h-8"
+        className="fc-window-drag-region fixed inset-x-0 top-0 z-20 h-32"
         data-tauri-drag-region
+        onMouseDown={handleWindowDragMouseDown}
       />
       <div
         className={

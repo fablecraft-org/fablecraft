@@ -1,4 +1,4 @@
-import { EMPTY_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
+import { EMPTY_EDITOR_DOCUMENT_JSON, NEW_CARD_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
 import {
   canCreateCardsFromContent,
   contentJsonForPlainText,
@@ -11,6 +11,15 @@ import {
 describe("document content rules", () => {
   it("prevents structural card creation from empty content", () => {
     expect(canCreateCardsFromContent(EMPTY_EDITOR_DOCUMENT_JSON)).toBe(false);
+  });
+
+  it("uses an empty heading as the default new-card document", () => {
+    expect(JSON.parse(NEW_CARD_EDITOR_DOCUMENT_JSON)).toEqual({
+      content: [{ attrs: { level: 1 }, type: "heading" }],
+      type: "doc",
+    });
+    expect(canCreateCardsFromContent(NEW_CARD_EDITOR_DOCUMENT_JSON)).toBe(false);
+    expect(contentPreview(NEW_CARD_EDITOR_DOCUMENT_JSON)).toBe("Empty card");
   });
 
   it("allows structural card creation from non-empty content", () => {
@@ -153,6 +162,31 @@ describe("document content rules", () => {
     const trimmed = trimTrailingEmptyParagraphs(contentJson);
 
     expect(contentText(trimmed)).toBe("Keep");
+  });
+
+  it("trims trailing hard breaks from the final paragraph", () => {
+    const contentJson = JSON.stringify({
+      content: [
+        {
+          content: [
+            { text: "Keep", type: "text" },
+            { type: "hardBreak" },
+          ],
+          type: "paragraph",
+        },
+      ],
+      type: "doc",
+    });
+
+    expect(JSON.parse(trimTrailingEmptyParagraphs(contentJson))).toEqual({
+      content: [
+        {
+          content: [{ text: "Keep", type: "text" }],
+          type: "paragraph",
+        },
+      ],
+      type: "doc",
+    });
   });
 
   it("returns the EMPTY document when trimming leaves nothing behind", () => {

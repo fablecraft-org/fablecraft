@@ -230,24 +230,29 @@ animation: ~140ms ease-in-out
 - up/down move within the packed spatial column
 - left/right change depth only
 - typing any printable character enters edit mode and forwards that character into the editor
-- Cmd/Ctrl+ArrowUp / Down / Right / Left create siblings, children, and wrapped parents
+- Tab+ArrowUp / Down / Right / Left create siblings, children, and wrapped parents in navigation mode
 - Shift+Up / Down moves within the packed column, can reorder root cards, and may reparent a card when crossing into a neighboring parent group
 - Shift+Right indents the active card under the sibling above as its last child
 - Option+Up / Down merges the active card with the sibling above or below while preserving the active card id
 - no invalid moves
 - empty cards cannot spawn new cards
+- newly created cards use an empty level-one heading document without an editor-appended trailing paragraph
 
 ### Editing
 - enter/escape behavior correct
 - backspace deletes empty non-root cards
+- Backspace from a trailing empty block trims that block immediately so the active card can remeasure smaller
 - ArrowDown at the end of a card moves into the card below in edit mode at the start of that card
 - ArrowUp at the start of a card moves into the card above in edit mode at the end of that card
 - ArrowRight at the end of a card moves into the first child in edit mode at the start of that card
 - Tab+Arrow navigates nearby cards, places the caret at the end of the destination card, and stays in edit mode
+- Tab+Arrow creates a card in the pointed direction when no nearby destination card exists in edit mode
+- Enter in an empty new-card heading converts the single heading line to a paragraph and does not create a sibling
 - Option+Up / Down in edit mode merges with the sibling above or below without leaving edit mode
 - markdown shortcuts render correctly, including visible list and heading styling
 - preview mode preserves heading and list structure after a card is deselected
 - double-enter creates a sibling below and trims the trailing empty paragraph from the source card
+- card exit paths trim trailing empty paragraphs and trailing hard breaks from the source card
 - split works
 
 ### Layout
@@ -255,6 +260,7 @@ animation: ~140ms ease-in-out
 - workspace stage fills the available window instead of clipping to an internal max width
 - workspace background matches the card surface rather than using a separate tint
 - on macOS, the native title bar overlays the app content and matches the active light/dark background instead of showing a separate strip
+- the desktop shell exposes a fixed top drag region that spans the full window width and the upper 128px, using both Tauri's drag-region marker and an explicit `startDragging` fallback
 - no helper text outside cards
 - cards do not resize on selection alone
 - preview cards retain measured height instead of collapsing back to the minimum, and they remeasure when content changes
@@ -402,6 +408,7 @@ Card numbering:
 Settings presentation:
 - Settings rows should expose row-level keyboard focus visually with a leading chevron-style cue.
 - Setting options may use stylized capsule controls, but keyboard behavior remains row-based: up/down moves between rows and left/right changes the current value.
+- `SettingsDialog` tracks the active row separately from transient DOM focus and restores focus after preference writes so theme token updates do not drop chevrons or keyboard navigation.
 - Shared titled overlays should render a soft full-width rule beneath the title inside `OverlayShell`.
 - `HelpSheet` should use the same surface and shadow treatment as Settings/Search overlays so support panels read as one coherent family.
 - Help support surfaces should include a `getting-started` mode reachable from the native Help menu, command palette, and the startup surface.

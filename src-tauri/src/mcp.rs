@@ -13,6 +13,8 @@ use crate::storage::{
     CardContentRecord, DocumentRepository, DocumentSnapshot, EditableDocumentSnapshot,
 };
 
+const NEW_CARD_EDITOR_DOCUMENT: &str =
+    r#"{"type":"doc","content":[{"type":"heading","attrs":{"level":1}}]}"#;
 const EMPTY_EDITOR_DOCUMENT: &str = r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
 const MAX_MCP_ARGUMENT_BYTES: usize = 16 * 1024;
 const MAX_MCP_PAYLOAD_BYTES: usize = 128 * 1024;
@@ -666,7 +668,7 @@ fn create_child_snapshot(
     let mut next_contents = snapshot.contents.clone();
     next_contents.push(CardContentRecord {
         card_id: next_card_id.to_string(),
-        content_json: EMPTY_EDITOR_DOCUMENT.to_string(),
+        content_json: NEW_CARD_EDITOR_DOCUMENT.to_string(),
     });
 
     Ok(DocumentSnapshot {
@@ -735,7 +737,7 @@ fn create_sibling_snapshot(
     let mut next_contents = snapshot.contents.clone();
     next_contents.push(CardContentRecord {
         card_id: next_card_id.to_string(),
-        content_json: EMPTY_EDITOR_DOCUMENT.to_string(),
+        content_json: NEW_CARD_EDITOR_DOCUMENT.to_string(),
     });
 
     Ok(DocumentSnapshot {
@@ -997,7 +999,7 @@ fn wrap_cards_in_parent_snapshot(
     let mut next_contents = snapshot.contents.clone();
     next_contents.push(CardContentRecord {
         card_id: next_parent_id.to_string(),
-        content_json: EMPTY_EDITOR_DOCUMENT.to_string(),
+        content_json: NEW_CARD_EDITOR_DOCUMENT.to_string(),
     });
 
     Ok(DocumentSnapshot {
@@ -1872,9 +1874,17 @@ mod tests {
             .iter()
             .filter(|card| card.parent_id.as_deref() == Some(root_card.id.as_str()))
             .count();
+        let child_content_json = persisted_snapshot
+            .contents
+            .iter()
+            .find(|content| content.card_id != root_card.id)
+            .expect("child content should exist")
+            .content_json
+            .as_str();
 
         assert!(response.snapshot.is_none());
         assert_eq!(child_count, 1);
+        assert_eq!(child_content_json, NEW_CARD_EDITOR_DOCUMENT);
 
         fs::remove_file(path).expect("temp file should be removable");
     }
@@ -1913,9 +1923,17 @@ mod tests {
         let persisted_snapshot =
             DocumentRepository::load(path.clone()).expect("snapshot should reload");
         let child_ids = ordered_child_ids(&persisted_snapshot, &root_card.id);
+        let created_content_json = persisted_snapshot
+            .contents
+            .iter()
+            .find(|content| content.card_id == created_id)
+            .expect("created content should exist")
+            .content_json
+            .as_str();
 
         assert!(response.snapshot.is_none());
         assert_eq!(child_ids, vec![created_id.to_string(), first_child_id]);
+        assert_eq!(created_content_json, NEW_CARD_EDITOR_DOCUMENT);
 
         fs::remove_file(path).expect("temp file should be removable");
     }
@@ -2190,6 +2208,15 @@ mod tests {
                 payload["wrappedCardIds"][0].as_str().unwrap().to_string(),
                 payload["wrappedCardIds"][1].as_str().unwrap().to_string(),
             ]
+        );
+        assert_eq!(
+            persisted_snapshot
+                .contents
+                .iter()
+                .find(|content| content.card_id == parent_id)
+                .expect("parent content should exist")
+                .content_json,
+            NEW_CARD_EDITOR_DOCUMENT
         );
 
         fs::remove_file(path).expect("temp file should be removable");

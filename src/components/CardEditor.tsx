@@ -2,6 +2,8 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef } from "react";
+import { trimTrailingEmptyParagraphs } from "../domain/document/content";
+import { EMPTY_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
 import { listenForFrontendMenuActions } from "../lib/nativeMenu";
 
 interface CardEditorProps {
@@ -73,6 +75,33 @@ function editorIsEffectivelyEmpty(editor: NonNullable<ReturnType<typeof useEdito
 
 function editorTextLength(editor: NonNullable<ReturnType<typeof useEditor>>) {
   return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n").length;
+}
+
+function selectionIsInTrailingEmptyBlock(
+  editor: NonNullable<ReturnType<typeof useEditor>>,
+) {
+  const { doc, selection } = editor.state;
+
+  return (
+    selection.empty &&
+    selection.$from.parent.textContent.trim() === "" &&
+    selection.$from.index(0) === doc.childCount - 1
+  );
+}
+
+function trimTrailingEmptyLineFromEditor(
+  editor: NonNullable<ReturnType<typeof useEditor>>,
+) {
+  const currentContentJson = JSON.stringify(editor.getJSON());
+  const trimmedContentJson = trimTrailingEmptyParagraphs(currentContentJson);
+
+  if (trimmedContentJson === currentContentJson) {
+    return false;
+  }
+
+  editor.commands.setContent(JSON.parse(trimmedContentJson));
+  editor.commands.focus("end");
+  return true;
 }
 
 export function isSelectionAtCardBoundary(
@@ -176,73 +205,35 @@ export function CardEditor({
           }
         }
 
-        if (
-          (event.metaKey || event.ctrlKey) &&
-          event.altKey === false &&
-          event.shiftKey === false
-        ) {
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            if (!canCreateStructure) {
-              return true;
-            }
-
-            onCreateSiblingAbove();
-            return true;
-          }
-
-          if (event.key === "ArrowDown") {
-            event.preventDefault();
-            if (!canCreateStructure) {
-              return true;
-            }
-
-            onCreateSiblingBelow();
-            return true;
-          }
-
-          if (event.key === "ArrowRight") {
-            event.preventDefault();
-            if (!canCreateStructure) {
-              return true;
-            }
-
-            onCreateChild();
-            return true;
-          }
-
-          if (event.key === "ArrowLeft") {
-            event.preventDefault();
-            if (!canCreateStructure) {
-              return true;
-            }
-
-            onCreateParentLevel();
-            return true;
-          }
-        }
-
         if (isTabHeld() && event.key === "ArrowUp") {
           event.preventDefault();
-          onNavigateAbove("end");
+          if (!onNavigateAbove("end") && canCreateStructure) {
+            onCreateSiblingAbove();
+          }
           return true;
         }
 
         if (isTabHeld() && event.key === "ArrowDown") {
           event.preventDefault();
-          onNavigateBelow("end");
+          if (!onNavigateBelow("end") && canCreateStructure) {
+            onCreateSiblingBelow();
+          }
           return true;
         }
 
         if (isTabHeld() && event.key === "ArrowRight") {
           event.preventDefault();
-          onNavigateChild("end");
+          if (!onNavigateChild("end") && canCreateStructure) {
+            onCreateChild();
+          }
           return true;
         }
 
         if (isTabHeld() && event.key === "ArrowLeft") {
           event.preventDefault();
-          onNavigateParent("end");
+          if (!onNavigateParent("end") && canCreateStructure) {
+            onCreateParentLevel();
+          }
           return true;
         }
 
@@ -302,6 +293,18 @@ export function CardEditor({
           return true;
         }
 
+        if (
+          event.key === "Backspace" &&
+          event.metaKey === false &&
+          event.ctrlKey === false &&
+          event.altKey === false &&
+          selectionIsInTrailingEmptyBlock(editor) &&
+          trimTrailingEmptyLineFromEditor(editor)
+        ) {
+          event.preventDefault();
+          return true;
+        }
+
         if (event.key === "Tab") {
           event.preventDefault();
           tabHeldRef.current = true;
@@ -318,6 +321,18 @@ export function CardEditor({
 
             const offsets = selectionTextOffsets(editor);
             onSplitAtSelection(offsets.start, offsets.end);
+            return true;
+          }
+
+          const isEmptyHeading =
+            editor.state.selection.empty &&
+            editor.state.selection.$from.parent.type.name === "heading" &&
+            editor.state.selection.$from.parent.textContent.trim() === "";
+
+          if (isEmptyHeading) {
+            event.preventDefault();
+            editor.commands.setContent(JSON.parse(EMPTY_EDITOR_DOCUMENT_JSON));
+            editor.commands.focus("end");
             return true;
           }
 
@@ -345,7 +360,11 @@ export function CardEditor({
         emptyEditorClass: "is-editor-empty",
         placeholder,
       }),
-      StarterKit,
+      StarterKit.configure({
+        trailingNode: {
+          notAfter: ["heading"],
+        },
+      }),
     ],
     immediatelyRender: false,
     onFocus() {

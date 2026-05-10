@@ -12,7 +12,8 @@ use crate::error::{AppError, AppErrorPayload, AppResult};
 mod migrations;
 
 const DEFAULT_CARD_TYPE: &str = "card";
-const EMPTY_EDITOR_DOCUMENT: &str = r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
+const NEW_CARD_EDITOR_DOCUMENT: &str =
+    r#"{"type":"doc","content":[{"type":"heading","attrs":{"level":1}}]}"#;
 const REVISION_PREVIEW_LIMIT: i64 = 20;
 
 #[derive(Debug, Clone, Serialize)]
@@ -310,7 +311,7 @@ fn seed_document(connection: &mut Connection) -> AppResult<()> {
 
     transaction.execute(
         "INSERT INTO card_content (card_id, content_json) VALUES (?1, ?2)",
-        params![root_card_id, EMPTY_EDITOR_DOCUMENT],
+        params![root_card_id, NEW_CARD_EDITOR_DOCUMENT],
     )?;
 
     transaction.commit()?;
@@ -691,6 +692,8 @@ fn now_ms() -> AppResult<u64> {
 mod tests {
     use super::*;
 
+    const EMPTY_EDITOR_DOCUMENT: &str = r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
+
     fn temp_document_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!("fablecraft-{label}-{}.fable", Uuid::new_v4()))
     }
@@ -710,6 +713,11 @@ mod tests {
         let content_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM card_content", [], |row| row.get(0))
             .expect("content query should succeed");
+        let root_content_json: String = connection
+            .query_row("SELECT content_json FROM card_content LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .expect("content query should succeed");
         let layer_table_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'layers'",
@@ -720,6 +728,7 @@ mod tests {
 
         assert_eq!(card_count, 1);
         assert_eq!(content_count, 1);
+        assert_eq!(root_content_json, NEW_CARD_EDITOR_DOCUMENT);
         assert_eq!(layer_table_count, 0);
 
         fs::remove_file(path).expect("temp file should be removable");

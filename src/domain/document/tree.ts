@@ -1,4 +1,4 @@
-import { EMPTY_EDITOR_DOCUMENT_JSON } from "./editorDocument";
+import { EMPTY_EDITOR_DOCUMENT_JSON, NEW_CARD_EDITOR_DOCUMENT_JSON } from "./editorDocument";
 import { normalizeDocumentSnapshot } from "./serialization";
 import { cardContent, mergeCardContentJson } from "./content";
 import { nextCardInColumn, previousCardInColumn } from "./spatial";
@@ -91,7 +91,7 @@ export function createChildCard(
     cards: snapshot.cards.concat(nextCard),
     contents: snapshot.contents.concat({
       cardId,
-      contentJson: EMPTY_EDITOR_DOCUMENT_JSON,
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
     }),
   });
 }
@@ -123,7 +123,7 @@ export function createSiblingAfter(
     cards: replaceSiblingGroup(snapshot.cards, sibling.parentId, nextGroup),
     contents: snapshot.contents.concat({
       cardId,
-      contentJson: EMPTY_EDITOR_DOCUMENT_JSON,
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
     }),
   });
 }
@@ -161,7 +161,7 @@ export function createSiblingBefore(
     cards: replaceSiblingGroup(snapshot.cards, sibling.parentId, nextGroup),
     contents: snapshot.contents.concat({
       cardId,
-      contentJson: EMPTY_EDITOR_DOCUMENT_JSON,
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
     }),
   });
 }
@@ -199,7 +199,7 @@ export function wrapLevelInParent(
       .concat(nextParent, wrappedChildren),
     contents: snapshot.contents.concat({
       cardId: newParentId,
-      contentJson: EMPTY_EDITOR_DOCUMENT_JSON,
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
     }),
   });
 }

@@ -3,7 +3,9 @@ import { normalizeDocumentSnapshot } from "./serialization";
 import type { CardContentRecord, DocumentSnapshot } from "./types";
 
 interface EditorNode {
+  attrs?: Record<string, unknown>;
   content?: EditorNode[];
+  marks?: unknown[];
   text?: string;
   type?: string;
 }
@@ -142,7 +144,13 @@ export function trimTrailingEmptyParagraphs(contentJson: string) {
   const trimmedContent = [...(document.content ?? [])];
 
   while (trimmedContent.length > 0) {
-    const lastNode = trimmedContent[trimmedContent.length - 1];
+    const lastNode = trimTrailingEmptyInlineContent(
+      trimmedContent[trimmedContent.length - 1] ?? null,
+    );
+
+    if (lastNode) {
+      trimmedContent[trimmedContent.length - 1] = lastNode;
+    }
 
     if (collectText(lastNode ?? null).trim().length > 0) {
       break;
@@ -159,6 +167,36 @@ export function trimTrailingEmptyParagraphs(contentJson: string) {
     ...document,
     content: trimmedContent,
   });
+}
+
+function trimTrailingEmptyInlineContent(node: EditorNode | null) {
+  if (!node?.content) {
+    return node;
+  }
+
+  const trimmedChildren = [...node.content];
+
+  while (trimmedChildren.length > 0) {
+    const lastChild = trimmedChildren[trimmedChildren.length - 1];
+
+    if (
+      lastChild?.type !== "hardBreak" &&
+      collectText(lastChild ?? null).length > 0
+    ) {
+      break;
+    }
+
+    trimmedChildren.pop();
+  }
+
+  if (trimmedChildren.length === node.content.length) {
+    return node;
+  }
+
+  return {
+    ...node,
+    content: trimmedChildren,
+  };
 }
 
 export function cardContent(

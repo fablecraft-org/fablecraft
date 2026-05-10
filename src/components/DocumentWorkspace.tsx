@@ -9,7 +9,7 @@ import {
   replaceCardContent,
   trimTrailingEmptyParagraphs,
 } from "../domain/document/content";
-import { EMPTY_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
+import { EMPTY_EDITOR_DOCUMENT_JSON, NEW_CARD_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
 import {
   firstChildCardId,
   parentCardId,
@@ -68,6 +68,7 @@ export function DocumentWorkspace({
   suspendKeyboard = false,
 }: DocumentWorkspaceProps) {
   const activeCardShellRef = useRef<HTMLDivElement | null>(null);
+  const tabKeyHeldRef = useRef(false);
   const wrappedParentSourceChildRef = useRef<Record<string, string>>({});
   const [pendingEditorFocusPlacement, setPendingEditorFocusPlacement] =
     useState<EditorFocusPlacement | null>(null);
@@ -217,11 +218,13 @@ export function DocumentWorkspace({
     stagePanLimit.x = Math.max(stagePanLimit.x, Math.abs(emptyChildGap.x) + uiMetrics.cardWidth);
     stagePanLimit.y = Math.max(stagePanLimit.y, Math.abs(emptyChildGap.y) + emptyChildGap.height);
   }
-  const activeHorizontalPadding = 33;
-  const activeTopPadding = 40;
-  const activeBottomPadding = 23;
   const isEditingSelectedCard = mode === "editing";
   const cardNumbers = activeSnapshot ? buildCardNumberMap(activeSnapshot) : {};
+  const isSelectedCardNewEmptyHeading =
+    selectedCardContent === NEW_CARD_EDITOR_DOCUMENT_JSON;
+  const activeHorizontalPadding = 33;
+  const activeTopPadding = isSelectedCardNewEmptyHeading ? 33 : 40;
+  const activeBottomPadding = isSelectedCardNewEmptyHeading ? 33 : 23;
 
   function focusCardForEditing(
     nextCardId: string | null,
@@ -512,13 +515,40 @@ export function DocumentWorkspace({
     return activeCardId;
   }
 
+  function trimCardBeforeExit(cardId: string | null) {
+    if (!cardId) {
+      return;
+    }
+
+    updateSnapshot((snapshotToChange) => {
+      const currentContentJson = cardContent(snapshotToChange, cardId);
+      const trimmedContentJson =
+        trimTrailingEmptyParagraphs(currentContentJson);
+
+      if (trimmedContentJson === currentContentJson) {
+        return snapshotToChange;
+      }
+
+      return replaceCardContent(snapshotToChange, {
+        cardId,
+        contentJson: trimmedContentJson,
+      });
+    });
+  }
+
   function leaveEditingMode() {
     if (!activeSnapshot || !activeCardId || !selectedCard) {
       setMode("navigation");
       return;
     }
 
-    abandonEmptyCard(fallbackCardIdAfterEmptyAbandon(activeSnapshot, activeCardId));
+    const nextActiveCardId = abandonEmptyCard(
+      fallbackCardIdAfterEmptyAbandon(activeSnapshot, activeCardId),
+    );
+
+    if (nextActiveCardId === activeCardId) {
+      trimCardBeforeExit(activeCardId);
+    }
 
     setMode("navigation");
   }
@@ -535,6 +565,10 @@ export function DocumentWorkspace({
 
     if (!cardIdToFocus) {
       return false;
+    }
+
+    if (cardIdToFocus !== activeCardId && !isSelectedCardEmpty) {
+      trimCardBeforeExit(activeCardId);
     }
 
     return focusCardForEditing(
@@ -593,24 +627,13 @@ export function DocumentWorkspace({
         return;
       }
 
-      if (
-        event.key.length === 1 &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey
-      ) {
+      if (event.key === "Tab") {
         event.preventDefault();
-        focusCardForEditing(currentCardId, "end", event.key);
+        tabKeyHeldRef.current = true;
         return;
       }
 
-      if ((event.key === "Backspace" || event.key === "Delete") && selectedCard) {
-        event.preventDefault();
-        handleDeleteCurrentCard(currentCardId);
-        return;
-      }
-
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+      if (tabKeyHeldRef.current) {
         if (event.key === "ArrowUp") {
           event.preventDefault();
           createRelativeCard("before");
@@ -634,6 +657,33 @@ export function DocumentWorkspace({
           createParentLevel();
           return;
         }
+      }
+
+      if (
+        event.key.length === 1 &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        focusCardForEditing(currentCardId, "end", event.key);
+        return;
+      }
+
+      if ((event.key === "Backspace" || event.key === "Delete") && selectedCard) {
+        event.preventDefault();
+        handleDeleteCurrentCard(currentCardId);
+        return;
+      }
+
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.key === "ArrowUp" ||
+          event.key === "ArrowDown" ||
+          event.key === "ArrowLeft" ||
+          event.key === "ArrowRight")
+      ) {
+        return;
       }
 
       if (event.shiftKey && event.key === "ArrowUp") {
@@ -714,10 +764,24 @@ export function DocumentWorkspace({
     }
 
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
     };
+
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.key === "Tab") {
+        tabKeyHeldRef.current = false;
+      }
+    }
+
+    function handleWindowBlur() {
+      tabKeyHeldRef.current = false;
+    }
   }, [
     activeCardId,
     activeSnapshot,

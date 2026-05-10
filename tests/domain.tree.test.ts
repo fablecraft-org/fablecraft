@@ -1,4 +1,4 @@
-import { EMPTY_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
+import { EMPTY_EDITOR_DOCUMENT_JSON, NEW_CARD_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
 import { contentJsonForPlainText } from "../src/domain/document/content";
 import { createChildCard, createSiblingAfter, createSiblingBefore, deleteCardSubtree, indentCardUnderPreviousSibling, mergeCardWithNextSibling, mergeCardWithPreviousSibling, moveCardWithinParent, outdentCard, unwrapCard, wrapLevelInParent } from "../src/domain/document/tree";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
@@ -18,7 +18,7 @@ describe("document tree operations", () => {
         (content) =>
           content.cardId === "card-c",
       )?.contentJson,
-    ).toBe(EMPTY_EDITOR_DOCUMENT_JSON);
+    ).toBe(NEW_CARD_EDITOR_DOCUMENT_JSON);
   });
 
   it("creates a sibling directly before the target card", () => {
@@ -39,11 +39,9 @@ describe("document tree operations", () => {
 
     expect(nextSnapshot.cards.some((card) => card.id === "card-a-1")).toBe(true);
     expect(
-      nextSnapshot.contents.some(
-        (content) =>
-          content.cardId === "card-a-1",
-      ),
-    ).toBe(true);
+      nextSnapshot.contents.find((content) => content.cardId === "card-a-1")
+        ?.contentJson,
+    ).toBe(NEW_CARD_EDITOR_DOCUMENT_JSON);
   });
 
   it("deletes an entire subtree and reindexes siblings", () => {
@@ -260,7 +258,7 @@ describe("document tree operations", () => {
         (content) =>
           content.cardId === "card-parent",
       )?.contentJson,
-    ).toBe(EMPTY_EDITOR_DOCUMENT_JSON);
+    ).toBe(NEW_CARD_EDITOR_DOCUMENT_JSON);
   });
 
   it("unwraps an empty parent card and restores its children to the previous level", () => {

@@ -145,7 +145,7 @@ export const WEBSITE_TUTORIAL_SNAPSHOT = {
     },
     {
       "cardId": "card-cd79ce0c-3461-4deb-877a-fb8965cfcf10",
-      "contentJson": "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Use ctrl and the arrows (→← ↑ ↓) to create cards in any direction. Double press enter to create a card directly below.\"}]}]}"
+      "contentJson": "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"In navigation mode, use ctrl and the arrows (→← ↑ ↓) to create cards in any direction. In edit mode, hold tab and use the arrows to navigate or create in that direction. Double press enter to create a card directly below.\"}]}]}"
     },
     {
       "cardId": "card-eb582138-ce3a-45bf-81a4-12aa88c9e3ad",

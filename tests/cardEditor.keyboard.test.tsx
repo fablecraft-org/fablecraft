@@ -3,7 +3,8 @@ import type { ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardEditor } from "../src/components/CardEditor";
-import { contentJsonForPlainText } from "../src/domain/document/content";
+import { contentJsonForPlainText, contentText } from "../src/domain/document/content";
+import { NEW_CARD_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
 
 function renderEditor(
   overrides: Partial<ComponentProps<typeof CardEditor>> = {},
@@ -105,8 +106,40 @@ describe("CardEditor keyboard behavior", () => {
     });
   });
 
-  it("uses Cmd+ArrowRight to create a child card", async () => {
+  it("lets Cmd+ArrowRight keep its native editor behavior", async () => {
     const { container, props, root } = renderEditor();
+
+    await act(async () => {
+      root.render(<CardEditor {...props} />);
+    });
+
+    const editorElement = container.querySelector(".ProseMirror") as HTMLElement | null;
+
+    expect(editorElement).not.toBeNull();
+
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "ArrowRight",
+      metaKey: true,
+    });
+
+    await act(async () => {
+      editorElement?.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(props.onCreateChild).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("uses Tab+ArrowRight to create a child when no child exists", async () => {
+    const { container, props, root } = renderEditor({
+      onNavigateChild: vi.fn(() => false),
+    });
 
     await act(async () => {
       root.render(<CardEditor {...props} />);
@@ -120,13 +153,60 @@ describe("CardEditor keyboard behavior", () => {
       editorElement?.dispatchEvent(
         new KeyboardEvent("keydown", {
           bubbles: true,
+          key: "Tab",
+        }),
+      );
+      editorElement?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
           key: "ArrowRight",
-          metaKey: true,
         }),
       );
     });
 
+    expect(props.onNavigateChild).toHaveBeenCalledTimes(1);
+    expect(props.onNavigateChild).toHaveBeenCalledWith("end");
     expect(props.onCreateChild).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("turns an empty new-card heading into regular text on Enter", async () => {
+    const { container, props, root } = renderEditor({
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
+      focusPlacement: "end",
+    });
+
+    await act(async () => {
+      root.render(<CardEditor {...props} />);
+    });
+
+    const editorElement = container.querySelector(".ProseMirror") as HTMLElement | null;
+
+    expect(editorElement?.querySelector("h1")).not.toBeNull();
+    expect(editorElement?.querySelectorAll("p")).toHaveLength(0);
+
+    await act(async () => {
+      editorElement?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Enter",
+        }),
+      );
+    });
+
+    const latestContentJson = vi.mocked(props.onUpdateContent).mock.lastCall?.[0];
+
+    expect(props.onCreateBelow).not.toHaveBeenCalled();
+    if (!latestContentJson) {
+      throw new Error("Expected the editor to publish updated paragraph content.");
+    }
+    expect(JSON.parse(latestContentJson)).toEqual({
+      content: [{ type: "paragraph" }],
+      type: "doc",
+    });
 
     await act(async () => {
       root.unmount();
@@ -214,6 +294,53 @@ describe("CardEditor keyboard behavior", () => {
     });
 
     expect(props.onRequestNavigation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("trims the trailing empty line immediately when Backspace returns to the previous line", async () => {
+    const { container, props, root } = renderEditor({
+      contentJson: JSON.stringify({
+        content: [
+          { content: [{ text: "Keep", type: "text" }], type: "paragraph" },
+          { type: "paragraph" },
+        ],
+        type: "doc",
+      }),
+      focusPlacement: "end",
+    });
+
+    await act(async () => {
+      root.render(<CardEditor {...props} />);
+    });
+
+    const editorElement = container.querySelector(".ProseMirror") as HTMLElement | null;
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Backspace",
+    });
+
+    await act(async () => {
+      editorElement?.dispatchEvent(event);
+    });
+
+    const latestContentJson = vi.mocked(props.onUpdateContent).mock.lastCall?.[0];
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(props.onDeleteEmpty).not.toHaveBeenCalled();
+    if (!latestContentJson) {
+      throw new Error("Expected Backspace to publish trimmed content.");
+    }
+    expect(contentText(latestContentJson)).toBe("Keep");
+    expect(JSON.parse(latestContentJson)).toEqual({
+      content: [
+        { content: [{ text: "Keep", type: "text" }], type: "paragraph" },
+      ],
+      type: "doc",
+    });
 
     await act(async () => {
       root.unmount();

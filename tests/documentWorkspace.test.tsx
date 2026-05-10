@@ -4,9 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentWorkspace } from "../src/components/DocumentWorkspace";
 import {
   contentJsonForPlainText,
+  contentText,
   isContentEffectivelyEmpty,
   replaceCardContent,
 } from "../src/domain/document/content";
+import { NEW_CARD_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
 import { useAppStore } from "../src/state/appStore";
 import { useDocumentStore } from "../src/state/documentStore";
 import { useInteractionStore } from "../src/state/interactionStore";
@@ -30,6 +32,7 @@ vi.mock("../src/components/CardEditor", () => ({
   CardEditor: ({
     focusPlacement,
     isEditing,
+    onCreateSiblingBelow,
     onDeleteEmpty,
     onNavigateAbove,
     onNavigateChild,
@@ -38,6 +41,7 @@ vi.mock("../src/components/CardEditor", () => ({
   }: {
     focusPlacement?: string | null;
     isEditing: boolean;
+    onCreateSiblingBelow?: () => void;
     onDeleteEmpty?: () => void;
     onNavigateAbove?: (placement?: "start" | "end") => boolean;
     onNavigateChild?: (placement?: "start" | "end") => boolean;
@@ -52,6 +56,7 @@ vi.mock("../src/components/CardEditor", () => ({
         data-pending-text-input={pendingTextInput ?? ""}
         data-testid="card-editor"
       />
+      <button data-testid="card-editor-create-sibling-below" onClick={() => onCreateSiblingBelow?.()} type="button" />
       <button data-testid="card-editor-delete-empty" onClick={() => onDeleteEmpty?.()} type="button" />
       <button data-testid="card-editor-navigate-above" onClick={() => onNavigateAbove?.()} type="button" />
       <button data-testid="card-editor-navigate-child-end" onClick={() => onNavigateChild?.("end")} type="button" />
@@ -223,6 +228,43 @@ describe("DocumentWorkspace", () => {
     expect(Array.from(container.querySelectorAll('[data-testid="tree-card"]')).map((node) =>
       (node as HTMLDivElement).dataset.cardLabel,
     )).toEqual(["B01", "B02"]);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("balances active card padding around a new empty heading card", async () => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-a",
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "editing",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const activeShell = container.querySelector(
+      '[data-testid="active-card-shell"]',
+    ) as HTMLDivElement | null;
+
+    expect(activeShell?.style.paddingTop).toBe("33px");
+    expect(activeShell?.style.paddingBottom).toBe("33px");
 
     await act(async () => {
       root.unmount();
@@ -579,6 +621,66 @@ describe("DocumentWorkspace", () => {
     });
   });
 
+  it("trims a trailing empty line when Escape leaves a non-empty card", async () => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-root",
+      contentJson: JSON.stringify({
+        content: [
+          { content: [{ text: "Keep", type: "text" }], type: "paragraph" },
+          { type: "paragraph" },
+        ],
+        type: "doc",
+      }),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "editing",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Escape",
+        }),
+      );
+    });
+
+    const nextContentJson =
+      useDocumentStore
+        .getState()
+        .snapshot?.contents.find((content) => content.cardId === "card-root")
+        ?.contentJson ?? "";
+
+    expect(contentText(nextContentJson)).toBe("Keep");
+    expect(JSON.parse(nextContentJson)).toEqual({
+      content: [
+        { content: [{ text: "Keep", type: "text" }], type: "paragraph" },
+      ],
+      type: "doc",
+    });
+    expect(useAppStore.getState().mode).toBe("navigation");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("deletes an empty root-level card before ArrowUp moves editing to the previous root card", async () => {
     const snapshot = {
       ...makeDocumentSnapshot(),
@@ -648,6 +750,66 @@ describe("DocumentWorkspace", () => {
     });
   });
 
+  it("trims the current card before edit-mode navigation focuses a child", async () => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-root",
+      contentJson: JSON.stringify({
+        content: [
+          { content: [{ text: "Root", type: "text" }], type: "paragraph" },
+          { type: "paragraph" },
+        ],
+        type: "doc",
+      }),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "editing",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const navigateChildEndButton = container.querySelector(
+      '[data-testid="card-editor-navigate-child-end"]',
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      navigateChildEndButton?.click();
+    });
+
+    const nextContentJson =
+      useDocumentStore
+        .getState()
+        .snapshot?.contents.find((content) => content.cardId === "card-root")
+        ?.contentJson ?? "";
+
+    expect(contentText(nextContentJson)).toBe("Root");
+    expect(JSON.parse(nextContentJson)).toEqual({
+      content: [
+        { content: [{ text: "Root", type: "text" }], type: "paragraph" },
+      ],
+      type: "doc",
+    });
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(useAppStore.getState().mode).toBe("editing");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("keeps edit mode and places focus at the end after Tab+ArrowRight navigates to a child", async () => {
     const snapshot = {
       ...makeDocumentSnapshot(),
@@ -701,6 +863,58 @@ describe("DocumentWorkspace", () => {
     expect(useInteractionStore.getState().activeCardId).toBe("card-a");
     expect(useAppStore.getState().mode).toBe("editing");
     expect(editor?.dataset.focusPlacement).toBe("end");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("creates and focuses a sibling below from edit-mode Tab+ArrowDown fallback", async () => {
+    let snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    snapshot = replaceCardContent(snapshot, {
+      cardId: "card-b",
+      contentJson: contentJsonForPlainText("Last scene"),
+    });
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "editing",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-b",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const createSiblingBelowButton = container.querySelector(
+      '[data-testid="card-editor-create-sibling-below"]',
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      createSiblingBelowButton?.click();
+    });
+
+    const nextSnapshot = useDocumentStore.getState().snapshot;
+    const rootChildren = nextSnapshot?.cards
+      .filter((card) => card.parentId === "card-root")
+      .sort((left, right) => left.orderIndex - right.orderIndex);
+    const newCardId = useInteractionStore.getState().activeCardId;
+    const editor = container.querySelector('[data-testid="card-editor"]');
+
+    expect(rootChildren).toHaveLength(3);
+    expect(rootChildren?.[2]?.id).toBe(newCardId);
+    expect(useAppStore.getState().mode).toBe("editing");
+    expect(editor?.getAttribute("data-focus-placement")).toBe("end");
 
     await act(async () => {
       root.unmount();
@@ -1027,7 +1241,67 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("uses Cmd+ArrowDown to create a sibling below and focus it in edit mode", async () => {
+  it("uses Tab+ArrowDown to create a sibling below and focus it in edit mode", async () => {
+    let snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    snapshot = replaceCardContent(snapshot, {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Scene"),
+    });
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Tab",
+        }),
+      );
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowDown",
+        }),
+      );
+    });
+
+    const nextSnapshot = useDocumentStore.getState().snapshot;
+    const rootChildren = nextSnapshot?.cards
+      .filter((card) => card.parentId === "card-root")
+      .sort((left, right) => left.orderIndex - right.orderIndex);
+    const newCardId = useInteractionStore.getState().activeCardId;
+    const editor = container.querySelector('[data-testid="card-editor"]');
+
+    expect(rootChildren).toHaveLength(3);
+    expect(rootChildren?.[1]?.id).toBe(newCardId);
+    expect(useAppStore.getState().mode).toBe("editing");
+    expect(editor?.getAttribute("data-focus-placement")).toBe("end");
+    expect(editor?.getAttribute("data-placeholder")).toBe("");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("lets Cmd+ArrowDown fall through without creating a sibling", async () => {
     let snapshot = makeDocumentSnapshot();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -1068,14 +1342,10 @@ describe("DocumentWorkspace", () => {
     const rootChildren = nextSnapshot?.cards
       .filter((card) => card.parentId === "card-root")
       .sort((left, right) => left.orderIndex - right.orderIndex);
-    const newCardId = useInteractionStore.getState().activeCardId;
-    const editor = container.querySelector('[data-testid="card-editor"]');
 
-    expect(rootChildren).toHaveLength(3);
-    expect(rootChildren?.[1]?.id).toBe(newCardId);
-    expect(useAppStore.getState().mode).toBe("editing");
-    expect(editor?.getAttribute("data-focus-placement")).toBe("end");
-    expect(editor?.getAttribute("data-placeholder")).toBe("");
+    expect(rootChildren).toHaveLength(2);
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(useAppStore.getState().mode).toBe("navigation");
 
     await act(async () => {
       root.unmount();

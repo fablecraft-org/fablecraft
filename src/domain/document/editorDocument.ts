@@ -3,3 +3,7 @@ export const EMPTY_EDITOR_DOCUMENT_JSON = JSON.stringify({
   type: "doc",
 });
 
+export const NEW_CARD_EDITOR_DOCUMENT_JSON = JSON.stringify({
+  content: [{ attrs: { level: 1 }, type: "heading" }],
+  type: "doc",
+});

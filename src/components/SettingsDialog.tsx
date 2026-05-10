@@ -1,9 +1,11 @@
 import {
   Fragment,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { OverlayShell } from "./OverlayShell";
@@ -13,7 +15,10 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
+const SETTING_ROW_COUNT = 6;
+
 function SettingGroup<T extends string>({
+  active,
   id,
   label,
   options,
@@ -24,6 +29,7 @@ function SettingGroup<T extends string>({
   rowRef,
   value,
 }: {
+  active: boolean;
   id: string;
   label: string;
   onChange: (value: T) => void;
@@ -34,7 +40,7 @@ function SettingGroup<T extends string>({
   onFocusNext: () => void;
   onFocused: () => void;
   onFocusPrevious: () => void;
-  rowRef: (element: HTMLDivElement | null) => void;
+  rowRef: (element: HTMLElement | null) => void;
   value: T;
 }) {
   const labelId = useId();
@@ -86,9 +92,10 @@ function SettingGroup<T extends string>({
     <section
       aria-labelledby={labelId}
       className="group bg-[var(--fc-color-surface-strong)] px-5 py-4 shadow-[var(--fc-shadow-soft)] outline-none transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)] focus:shadow-[var(--fc-shadow-elevated)] focus-visible:shadow-[var(--fc-shadow-elevated)]"
+      data-active={active ? "true" : "false"}
       data-testid={`setting-row-${id}`}
       onClickCapture={(event) => {
-        (event.currentTarget as HTMLDivElement).focus();
+        event.currentTarget.focus();
       }}
       onFocus={onFocused}
       onKeyDown={handleRowKeyDown}
@@ -99,7 +106,9 @@ function SettingGroup<T extends string>({
         <div className="flex items-center gap-2">
           <span
             aria-hidden="true"
-            className="inline-flex w-3 justify-center font-[var(--fc-font-ui)] text-xs font-semibold text-[var(--fc-color-text)] opacity-0 transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)] group-focus-within:opacity-100"
+            className="inline-flex w-3 justify-center font-[var(--fc-font-ui)] text-xs font-semibold text-[var(--fc-color-text)] transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
+            data-testid={`setting-row-${id}-chevron`}
+            style={{ opacity: active ? 1 : 0 }}
           >
             &gt;
           </span>
@@ -168,7 +177,8 @@ function SettingGroup<T extends string>({
 
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const activeRowIndexRef = useRef(0);
-  const rowRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const rowRefs = useRef<Array<HTMLElement | null>>([]);
+  const [activeRowIndex, setActiveRowIndex] = useState(0);
   const preferences = useSettingsStore((state) => state.preferences);
   const resetPreferences = useSettingsStore((state) => state.resetPreferences);
   const setCardWidth = useSettingsStore((state) => state.setCardWidth);
@@ -178,19 +188,20 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const setTextSize = useSettingsStore((state) => state.setTextSize);
   const setTheme = useSettingsStore((state) => state.setTheme);
 
-  function focusRow(index: number) {
-    const nextIndex = (index + 6) % 6;
+  const focusRow = useCallback((index: number) => {
+    const nextIndex = (index + SETTING_ROW_COUNT) % SETTING_ROW_COUNT;
     activeRowIndexRef.current = nextIndex;
+    setActiveRowIndex(nextIndex);
     rowRefs.current[nextIndex]?.focus();
-  }
-
-  useEffect(() => {
-    rowRefs.current[0]?.focus();
   }, []);
 
+  useEffect(() => {
+    focusRow(activeRowIndexRef.current);
+  }, [focusRow]);
+
   useLayoutEffect(() => {
-    rowRefs.current[activeRowIndexRef.current]?.focus();
-  }, [preferences]);
+    focusRow(activeRowIndexRef.current);
+  }, [focusRow, preferences]);
 
   return (
     <OverlayShell
@@ -210,11 +221,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     >
       <div className="flex flex-col gap-3">
         <SettingGroup
+          active={activeRowIndex === 0}
           id="theme"
           label="Theme"
           onChange={setTheme}
           onFocused={() => {
             activeRowIndexRef.current = 0;
+            setActiveRowIndex(0);
           }}
           onFocusNext={() => focusRow(1)}
           onFocusPrevious={() => focusRow(-1)}
@@ -228,11 +241,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           value={preferences.theme}
         />
         <SettingGroup
+          active={activeRowIndex === 1}
           id="font"
           label="Font"
           onChange={setFont}
           onFocused={() => {
             activeRowIndexRef.current = 1;
+            setActiveRowIndex(1);
           }}
           onFocusNext={() => focusRow(2)}
           onFocusPrevious={() => focusRow(0)}
@@ -246,11 +261,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           value={preferences.font}
         />
         <SettingGroup
+          active={activeRowIndex === 2}
           id="text-size"
           label="Text Size"
           onChange={setTextSize}
           onFocused={() => {
             activeRowIndexRef.current = 2;
+            setActiveRowIndex(2);
           }}
           onFocusNext={() => focusRow(3)}
           onFocusPrevious={() => focusRow(1)}
@@ -264,11 +281,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           value={preferences.textSize}
         />
         <SettingGroup
+          active={activeRowIndex === 3}
           id="line-height"
           label="Line Height"
           onChange={setLineHeight}
           onFocused={() => {
             activeRowIndexRef.current = 3;
+            setActiveRowIndex(3);
           }}
           onFocusNext={() => focusRow(4)}
           onFocusPrevious={() => focusRow(2)}
@@ -282,11 +301,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           value={preferences.lineHeight}
         />
         <SettingGroup
+          active={activeRowIndex === 4}
           id="card-width"
           label="Card Width"
           onChange={setCardWidth}
           onFocused={() => {
             activeRowIndexRef.current = 4;
+            setActiveRowIndex(4);
           }}
           onFocusNext={() => focusRow(5)}
           onFocusPrevious={() => focusRow(3)}
@@ -300,11 +321,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           value={preferences.cardWidth}
         />
         <SettingGroup
+          active={activeRowIndex === 5}
           id="scroll-pan"
           label="Trackpad Pan"
           onChange={setScrollPan}
           onFocused={() => {
             activeRowIndexRef.current = 5;
+            setActiveRowIndex(5);
           }}
           onFocusNext={() => focusRow(0)}
           onFocusPrevious={() => focusRow(4)}

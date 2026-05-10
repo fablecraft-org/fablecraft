@@ -36,6 +36,11 @@ body[data-fc-runtime="web"] {
   box-sizing: border-box;
 }
 
+.fc-window-drag-region {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
 button,
 input,
 textarea,
