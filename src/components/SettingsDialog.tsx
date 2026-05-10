@@ -17,6 +17,10 @@ interface SettingsDialogProps {
 
 const SETTING_ROW_COUNT = 6;
 
+function settingOptionIndex(options: string[], value: string) {
+  return Math.max(0, options.findIndex((option) => option === value));
+}
+
 function SettingGroup<T extends string>({
   active,
   id,
@@ -178,6 +182,7 @@ function SettingGroup<T extends string>({
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const activeRowIndexRef = useRef(0);
   const rowRefs = useRef<Array<HTMLElement | null>>([]);
+  const focusTimeoutRef = useRef<number | null>(null);
   const [activeRowIndex, setActiveRowIndex] = useState(0);
   const preferences = useSettingsStore((state) => state.preferences);
   const resetPreferences = useSettingsStore((state) => state.resetPreferences);
@@ -195,13 +200,132 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     rowRefs.current[nextIndex]?.focus();
   }, []);
 
+  const restoreActiveRowFocus = useCallback(() => {
+    rowRefs.current[activeRowIndexRef.current]?.focus();
+  }, []);
+
   useEffect(() => {
     focusRow(activeRowIndexRef.current);
   }, [focusRow]);
 
   useLayoutEffect(() => {
     focusRow(activeRowIndexRef.current);
-  }, [focusRow, preferences]);
+    window.requestAnimationFrame(restoreActiveRowFocus);
+
+    if (focusTimeoutRef.current !== null) {
+      window.clearTimeout(focusTimeoutRef.current);
+    }
+
+    focusTimeoutRef.current = window.setTimeout(() => {
+      restoreActiveRowFocus();
+      focusTimeoutRef.current = null;
+    }, 50);
+  }, [focusRow, preferences, restoreActiveRowFocus]);
+
+  useEffect(
+    () => () => {
+      if (focusTimeoutRef.current !== null) {
+        window.clearTimeout(focusTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    function changeActiveRowValue(key: string) {
+      const movePrevious = key === "ArrowLeft";
+      const moveNext = key === "ArrowRight";
+      const moveHome = key === "Home";
+      const moveEnd = key === "End";
+
+      if (!movePrevious && !moveNext && !moveHome && !moveEnd) {
+        return false;
+      }
+
+      const activeIndex = activeRowIndexRef.current;
+
+      const chooseNextValue = <T extends string>(options: T[], value: T) => {
+        const selectedIndex = settingOptionIndex(options, value);
+        const nextIndex = moveHome
+          ? 0
+          : moveEnd
+            ? options.length - 1
+            : movePrevious
+              ? Math.max(0, selectedIndex - 1)
+              : Math.min(options.length - 1, selectedIndex + 1);
+
+        return options[nextIndex]!;
+      };
+
+      if (activeIndex === 0) {
+        setTheme(chooseNextValue(["light", "dark"], preferences.theme));
+      } else if (activeIndex === 1) {
+        setFont(chooseNextValue(["serif", "sans"], preferences.font));
+      } else if (activeIndex === 2) {
+        setTextSize(
+          chooseNextValue(["comfortable", "large"], preferences.textSize),
+        );
+      } else if (activeIndex === 3) {
+        setLineHeight(
+          chooseNextValue(["compact", "relaxed"], preferences.lineHeight),
+        );
+      } else if (activeIndex === 4) {
+        setCardWidth(
+          chooseNextValue(["standard", "wide"], preferences.cardWidth),
+        );
+      } else if (activeIndex === 5) {
+        setScrollPan(
+          chooseNextValue(["enabled", "disabled"], preferences.scrollPan),
+        );
+      }
+
+      return true;
+    }
+
+    function handleDocumentKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+
+      const moveRowPrevious = event.key === "ArrowUp";
+      const moveRowNext = event.key === "ArrowDown";
+
+      if (moveRowPrevious || moveRowNext) {
+        event.preventDefault();
+        event.stopPropagation();
+        focusRow(activeRowIndexRef.current + (moveRowPrevious ? -1 : 1));
+        return;
+      }
+
+      if (changeActiveRowValue(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+
+    document.addEventListener("keydown", handleDocumentKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [
+    focusRow,
+    onClose,
+    preferences,
+    setCardWidth,
+    setFont,
+    setLineHeight,
+    setScrollPan,
+    setTextSize,
+    setTheme,
+  ]);
 
   return (
     <OverlayShell

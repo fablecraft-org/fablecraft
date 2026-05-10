@@ -80,6 +80,22 @@ Mutation tools:
 
 `fablecraft_get_document` returns `treeDepthCounts`, where `[1, 4, 7, 32]` means the root depth has 1 card, the next depth has 4 cards, and so on. `fablecraft_get_card` returns ordered direct `childCardIds`. Mutation tools return lightweight status payloads rather than full document snapshots.
 
+### Card Text And Headings
+
+`fablecraft_set_card_text` accepts a `text` string. Fablecraft stores card content as TipTap JSON, not raw Markdown, so heading markers are converted at write time:
+
+```json
+{
+  "documentPath": "/Users/callum/Documents/story.fable",
+  "cardId": "card-id",
+  "text": "# Title\n\nBody text"
+}
+```
+
+The first line is persisted as a rendered level-one heading node, and `Body text` is persisted as paragraph text. `## Section` and `### Beat` become rendered level-two and level-three headings. Deeper Markdown heading markers are capped to Fablecraft's supported heading levels.
+
+Other Markdown syntax sent through `fablecraft_set_card_text` is not interpreted by the MCP server yet; it is stored as ordinary paragraph text.
+
 `fablecraft_move_card` takes `cardId` plus exactly one of `beforeCardId` or `afterCardId`. The target card determines the destination parent, so moving before or after a card can also reparent the moved card while preserving its subtree.
 
 Layers are not exposed through MCP. Older layer-backed files are migrated into the single-plane document schema when opened.

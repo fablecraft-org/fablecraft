@@ -453,6 +453,7 @@ Export:
 - `get_document` includes structural tree depth counts, for example `[1, 4, 7, 32]` for card counts by depth from root outward
 - `get_card` includes ordered direct child card ids when present
 - external MCP writes should appear in the open document without manually reopening it
+- `set_card_text` converts Markdown heading lines such as `# Title`, `## Section`, and `### Beat` into rendered card headings while leaving other Markdown syntax as ordinary text
 - MCP tools do not expose layer ids or layer operations
 - older layer-backed files are migrated into the single-plane schema; layers are not retained as a compatibility feature
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveNativeWindowAppearance } from "../src/lib/nativeWindowAppearance";
+import {
+  consumeNativeWindowAppearanceTitleBarStyleSyncForProcess,
+  readNativeWindowAppearanceDiagnosticMode,
+  resetNativeWindowAppearanceTitleBarStyleSyncForTests,
+  resolveNativeWindowAppearance,
+} from "../src/lib/nativeWindowAppearance";
 
 describe("resolveNativeWindowAppearance", () => {
   it("matches the light theme exactly to the card background", () => {
@@ -18,5 +23,32 @@ describe("resolveNativeWindowAppearance", () => {
       theme: "dark",
       titleBarStyle: "overlay",
     });
+  });
+
+  it("reads only supported native appearance diagnostic modes", () => {
+    window.localStorage.setItem(
+      "fablecraft.native-window-appearance-diagnostic",
+      "set-window-theme",
+    );
+
+    expect(readNativeWindowAppearanceDiagnosticMode()).toBe("set-window-theme");
+
+    window.localStorage.setItem(
+      "fablecraft.native-window-appearance-diagnostic",
+      "anything-else",
+    );
+
+    expect(readNativeWindowAppearanceDiagnosticMode()).toBeNull();
+  });
+
+  it("allows title bar style sync only once per app process", () => {
+    resetNativeWindowAppearanceTitleBarStyleSyncForTests();
+
+    expect(consumeNativeWindowAppearanceTitleBarStyleSyncForProcess(true)).toBe(true);
+    expect(consumeNativeWindowAppearanceTitleBarStyleSyncForProcess(true)).toBe(false);
+
+    resetNativeWindowAppearanceTitleBarStyleSyncForTests();
+
+    expect(consumeNativeWindowAppearanceTitleBarStyleSyncForProcess(false)).toBe(false);
   });
 });

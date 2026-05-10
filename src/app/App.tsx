@@ -137,8 +137,8 @@ export function App() {
   }
 
   useEffect(() => {
-    void syncNativeWindowAppearance(theme);
-  }, [theme]);
+    void syncNativeWindowAppearance(theme, { restoreFocus: isSettingsOpen });
+  }, [isSettingsOpen, theme]);
 
   useEffect(() => {
     setRecentDocumentPaths(readRecentDocumentPaths());

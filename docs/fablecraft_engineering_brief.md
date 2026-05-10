@@ -345,7 +345,7 @@ animation: ~140ms ease-in-out
 - `get_document` returns structured JSON for the active document plane, including `treeDepthCounts`
 - `get_card` returns structured JSON for the active document plane, including ordered direct `childCardIds`
 - `get_subtree` returns structured JSON for the active document plane
-- `set_card_text` persists through the repository and returns a lightweight status result
+- `set_card_text` persists through the repository, converts Markdown heading lines into TipTap heading nodes, and returns a lightweight status result
 - the Claude-compatible stdio binary accepts explicit `.fable` paths so Claude Desktop can call it directly
 - local integration enablement searches both bundled app locations and nearby `target/release` / `src-tauri/target/release` development binaries
 - structural tree mutation is exposed through create child, create sibling before/after, move card before/after another card, wrap contiguous sibling ids in a parent, and delete card tools
@@ -409,6 +409,9 @@ Settings presentation:
 - Settings rows should expose row-level keyboard focus visually with a leading chevron-style cue.
 - Setting options may use stylized capsule controls, but keyboard behavior remains row-based: up/down moves between rows and left/right changes the current value.
 - `SettingsDialog` tracks the active row separately from transient DOM focus and restores focus after preference writes so theme token updates do not drop chevrons or keyboard navigation.
+- Native window appearance sync should restore window and webview focus while Settings is open because macOS/Tauri theme updates can make the webview stop receiving keyboard events until the window is clicked.
+- The macOS title bar style is constant `overlay` chrome and must be applied only once per app process, effectively on app restart; do not call `setTitleBarStyle` during live theme switching because it causes native focus loss.
+- Native window appearance diagnostics can isolate focus loss by setting localStorage key `fablecraft.native-window-appearance-diagnostic` to `no-native`, `set-app-theme`, `set-background-color`, `set-window-theme`, `set-title-bar-style`, or `all`; diagnostic mode intentionally skips focus restoration and logs `[theme-focus]` entries.
 - Shared titled overlays should render a soft full-width rule beneath the title inside `OverlayShell`.
 - `HelpSheet` should use the same surface and shadow treatment as Settings/Search overlays so support panels read as one coherent family.
 - Help support surfaces should include a `getting-started` mode reachable from the native Help menu, command palette, and the startup surface.

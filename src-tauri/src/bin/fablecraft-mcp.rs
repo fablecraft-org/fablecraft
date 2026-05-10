@@ -276,7 +276,7 @@ fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             TOOL_SET_CARD_TEXT,
-            "Replace the selected card's content with plain text.",
+            "Replace the selected card's content with text. Markdown heading lines like \"# Title\" become rendered card headings; other Markdown syntax remains plain text.",
             object_schema(
                 &[
                     (
@@ -284,7 +284,12 @@ fn tool_definitions() -> Vec<Value> {
                         path_schema("Absolute path to a .fable document."),
                     ),
                     ("cardId", string_schema("Card id to update.")),
-                    ("text", string_schema("Plain text content for the card.")),
+                    (
+                        "text",
+                        string_schema(
+                            "Card content. Use heading lines such as \"# Title\" or \"## Section\" for rendered headings; ordinary lines become paragraph text.",
+                        ),
+                    ),
                 ],
                 &["documentPath", "cardId", "text"],
             ),
@@ -496,11 +501,19 @@ mod tests {
             .iter()
             .find(|tool| tool["name"] == TOOL_GET_DOCUMENT)
             .expect("get document tool should exist");
+        let set_card_text = tools
+            .iter()
+            .find(|tool| tool["name"] == TOOL_SET_CARD_TEXT)
+            .expect("set card text tool should exist");
 
         assert_eq!(
             get_document["inputSchema"]["properties"]["documentPath"]["pattern"],
             ".*\\.fable$"
         );
+        assert!(set_card_text["description"]
+            .as_str()
+            .expect("description should be a string")
+            .contains("Markdown heading lines"));
     }
 
     #[test]

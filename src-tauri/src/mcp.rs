@@ -129,10 +129,10 @@ pub fn list_mcp_tools() -> Vec<McpToolDefinition> {
             scope: "subtree".to_string(),
         },
         McpToolDefinition {
-            description: "Replace the selected card's content with plain text."
+            description: "Replace the selected card's content with text. Markdown heading lines like \"# Title\" become rendered card headings; other Markdown syntax remains plain text."
                 .to_string(),
             input_example:
-                "{\n  \"documentPath\": \"/path/to/story.fable\",\n  \"cardId\": \"card-id\",\n  \"text\": \"Rewrite this beat in plain text.\"\n}"
+                "{\n  \"documentPath\": \"/path/to/story.fable\",\n  \"cardId\": \"card-id\",\n  \"text\": \"# Scene title\\n\\nRewrite this beat.\"\n}"
                     .to_string(),
             is_mutation: true,
             name: TOOL_SET_CARD_TEXT.to_string(),
@@ -1423,37 +1423,32 @@ fn content_json_for_plain_text(text: &str) -> AppResult<String> {
         return Ok(EMPTY_EDITOR_DOCUMENT.to_string());
     }
 
-    let paragraphs = normalized_text
-        .split("\n\n")
-        .map(|paragraph| {
-            let lines = paragraph
-                .split('\n')
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>();
-            let text_nodes = lines
-                .iter()
-                .enumerate()
-                .map(|(index, line)| {
-                    json!({
-                        "text": if index + 1 < lines.len() {
-                            format!("{line}\n")
-                        } else {
-                            (*line).to_string()
-                        },
-                        "type": "text",
-                    })
-                })
-                .collect::<Vec<_>>();
+    let mut blocks = Vec::new();
+    let mut paragraph_lines = Vec::new();
 
-            json!({
-                "content": text_nodes,
-                "type": "paragraph",
-            })
-        })
-        .collect::<Vec<_>>();
+    for line in normalized_text.split('\n') {
+        if line.is_empty() {
+            push_paragraph_block(&mut blocks, &mut paragraph_lines);
+            continue;
+        }
+
+        if let Some((level, title)) = parse_markdown_heading_line(line) {
+            push_paragraph_block(&mut blocks, &mut paragraph_lines);
+            blocks.push(json!({
+                "attrs": { "level": level },
+                "content": [{ "text": title, "type": "text" }],
+                "type": "heading",
+            }));
+            continue;
+        }
+
+        paragraph_lines.push(line.to_string());
+    }
+
+    push_paragraph_block(&mut blocks, &mut paragraph_lines);
 
     serde_json::to_string(&json!({
-        "content": paragraphs,
+        "content": blocks,
         "type": "doc",
     }))
     .map_err(|error| {
@@ -1463,6 +1458,52 @@ fn content_json_for_plain_text(text: &str) -> AppResult<String> {
             Some(error.to_string()),
         )
     })
+}
+
+fn push_paragraph_block(blocks: &mut Vec<Value>, paragraph_lines: &mut Vec<String>) {
+    if paragraph_lines.is_empty() {
+        return;
+    }
+
+    let text_nodes = paragraph_lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            json!({
+                "text": if index + 1 < paragraph_lines.len() {
+                    format!("{line}\n")
+                } else {
+                    line.to_string()
+                },
+                "type": "text",
+            })
+        })
+        .collect::<Vec<_>>();
+
+    blocks.push(json!({
+        "content": text_nodes,
+        "type": "paragraph",
+    }));
+    paragraph_lines.clear();
+}
+
+fn parse_markdown_heading_line(line: &str) -> Option<(usize, String)> {
+    let marker_count = line
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
+
+    if marker_count == 0 || marker_count > 6 {
+        return None;
+    }
+
+    let title = line.get(marker_count..)?.strip_prefix(' ')?;
+
+    if title.trim().is_empty() {
+        return None;
+    }
+
+    Some((marker_count.min(3), title.to_string()))
 }
 
 fn collect_text(node: &Value) -> String {
@@ -1841,6 +1882,51 @@ mod tests {
         assert!(response.snapshot.is_none());
         assert!(root_content.content_json.contains("Updated beat"));
         assert_eq!(persisted_snapshot.revisions.len(), 1);
+
+        fs::remove_file(path).expect("temp file should be removable");
+    }
+
+    #[test]
+    fn set_card_text_converts_markdown_heading_lines_to_heading_nodes() {
+        let path = temp_document_path("set-card-heading");
+        DocumentRepository::create(path.clone()).expect("document should create");
+        let snapshot = DocumentRepository::load(path.clone()).expect("snapshot should load");
+        let root_card = snapshot
+            .cards
+            .iter()
+            .find(|card| card.parent_id.is_none())
+            .expect("root card should exist")
+            .clone();
+
+        invoke_mcp_tool_inner(
+            path.clone(),
+            McpToolRequest {
+                arguments_json: Some(json!({ "text": "# Title\n\nBody line" }).to_string()),
+                card_id: Some(root_card.id.clone()),
+                scope: "card".to_string(),
+                tool_name: TOOL_SET_CARD_TEXT.to_string(),
+            },
+        )
+        .expect("mutation tool should succeed");
+
+        let persisted_snapshot =
+            DocumentRepository::load(path.clone()).expect("snapshot should reload");
+        let root_content = persisted_snapshot
+            .contents
+            .iter()
+            .find(|content| content.card_id == root_card.id)
+            .expect("root content should exist");
+        let content_json: Value =
+            serde_json::from_str(&root_content.content_json).expect("content should be valid json");
+
+        assert_eq!(content_json["content"][0]["type"], "heading");
+        assert_eq!(content_json["content"][0]["attrs"]["level"], 1);
+        assert_eq!(content_json["content"][0]["content"][0]["text"], "Title");
+        assert_eq!(content_json["content"][1]["type"], "paragraph");
+        assert_eq!(
+            content_json["content"][1]["content"][0]["text"],
+            "Body line"
+        );
 
         fs::remove_file(path).expect("temp file should be removable");
     }

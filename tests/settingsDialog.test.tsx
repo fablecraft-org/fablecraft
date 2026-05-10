@@ -194,4 +194,69 @@ describe("SettingsDialog", () => {
       root.unmount();
     });
   });
+
+  it("keeps settings keyboard controls alive when theme changes leave row focus", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const externalFocusTarget = document.createElement("button");
+    document.body.appendChild(externalFocusTarget);
+    const root = createRoot(container);
+    const onClose = vi.fn();
+
+    act(() => {
+      root.render(<SettingsDialog onClose={onClose} />);
+    });
+
+    const themeRow = container.querySelector(
+      '[data-testid="setting-row-theme"]',
+    ) as HTMLDivElement | null;
+    const fontRow = container.querySelector(
+      '[data-testid="setting-row-font"]',
+    ) as HTMLDivElement | null;
+    const themeChevron = container.querySelector(
+      '[data-testid="setting-row-theme-chevron"]',
+    ) as HTMLElement | null;
+    const darkButton = Array.from(themeRow?.querySelectorAll("button") ?? []).find(
+      (button) => button.textContent?.includes("Dark"),
+    ) as HTMLButtonElement | undefined;
+    act(() => {
+      darkButton?.click();
+    });
+
+    act(() => {
+      externalFocusTarget.focus();
+    });
+
+    expect(useSettingsStore.getState().preferences.theme).toBe("dark");
+    expect(themeRow?.dataset.active).toBe("true");
+    expect(themeChevron?.style.opacity).toBe("1");
+    expect(document.activeElement).toBe(externalFocusTarget);
+
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowDown",
+        }),
+      );
+    });
+
+    expect(document.activeElement).toBe(fontRow);
+
+    act(() => {
+      externalFocusTarget.focus();
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Escape",
+        }),
+      );
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root.unmount();
+    });
+  });
 });
