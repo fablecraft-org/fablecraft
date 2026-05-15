@@ -13,6 +13,7 @@ const APP_SETTINGS: &str = "app.settings";
 const APP_CHECK_FOR_UPDATES: &str = "app.check_for_updates";
 const FILE_NEW_DOCUMENT: &str = "file.new_document";
 const FILE_OPEN_DOCUMENT: &str = "file.open_document";
+const FILE_OPEN_RECENT: &str = "file.open_recent";
 const FILE_SAVE: &str = "file.save";
 const FILE_IMPORT_MARKDOWN: &str = "file.import_markdown";
 const FILE_EXPORT_MARKDOWN: &str = "file.export_markdown";
@@ -32,6 +33,8 @@ const TOOLS_SEARCH: &str = "tools.search";
 const TOOLS_ENABLE_CODEX: &str = "tools.enable_codex";
 const TOOLS_ENABLE_CLAUDE_DESKTOP: &str = "tools.enable_claude_desktop";
 const WINDOW_RELOAD: &str = "window.reload";
+const WINDOW_ZOOM_IN: &str = "window.zoom_in";
+const WINDOW_ZOOM_OUT: &str = "window.zoom_out";
 const HELP_SHORTCUTS: &str = "help.shortcuts";
 const HELP_COMMANDS: &str = "help.commands";
 const HELP_GETTING_STARTED: &str = "help.getting_started";
@@ -55,6 +58,9 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .build(app)?;
     let open_document = MenuItemBuilder::with_id(FILE_OPEN_DOCUMENT, "Open Document")
         .accelerator("CmdOrCtrl+O")
+        .build(app)?;
+    let open_recent = MenuItemBuilder::with_id(FILE_OPEN_RECENT, "Open Recent")
+        .accelerator("CmdOrCtrl+Shift+O")
         .build(app)?;
     let save = MenuItemBuilder::with_id(FILE_SAVE, "Save")
         .accelerator("CmdOrCtrl+S")
@@ -113,6 +119,12 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     let reload = MenuItemBuilder::with_id(WINDOW_RELOAD, "Reload")
         .accelerator("CmdOrCtrl+R")
         .build(app)?;
+    let zoom_in = MenuItemBuilder::with_id(WINDOW_ZOOM_IN, "Zoomed In")
+        .accelerator("CmdOrCtrl+=")
+        .build(app)?;
+    let zoom_out = MenuItemBuilder::with_id(WINDOW_ZOOM_OUT, "Zoomed Out")
+        .accelerator("CmdOrCtrl+-")
+        .build(app)?;
 
     let shortcuts = MenuItemBuilder::with_id(HELP_SHORTCUTS, "Shortcuts").build(app)?;
     let commands = MenuItemBuilder::with_id(HELP_COMMANDS, "Commands").build(app)?;
@@ -139,6 +151,7 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_document)
         .item(&open_document)
+        .item(&open_recent)
         .item(&save)
         .separator()
         .item(&import_markdown)
@@ -179,6 +192,10 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
 
     let window_menu = SubmenuBuilder::with_id(app, WINDOW_SUBMENU_ID, "Window")
         .item(&reload)
+        .separator()
+        .item(&zoom_in)
+        .item(&zoom_out)
+        .separator()
         .minimize_with_text("Minimize")
         .fullscreen_with_text("Toggle Full Screen")
         .build()?;
@@ -214,6 +231,7 @@ pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent
         }
         FILE_NEW_DOCUMENT => emit_action(app, "new-document"),
         FILE_OPEN_DOCUMENT => emit_action(app, "open-document"),
+        FILE_OPEN_RECENT => emit_action(app, "open-recent"),
         FILE_SAVE => emit_action(app, "save"),
         FILE_IMPORT_MARKDOWN => emit_action(app, "import-markdown"),
         FILE_EXPORT_MARKDOWN => emit_action(app, "export-markdown"),
@@ -234,6 +252,8 @@ pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent
         TOOLS_SEARCH => emit_action(app, "search"),
         TOOLS_ENABLE_CODEX => emit_action(app, "enable-codex"),
         TOOLS_ENABLE_CLAUDE_DESKTOP => emit_action(app, "enable-claude-desktop"),
+        WINDOW_ZOOM_IN => emit_action(app, "zoom-in"),
+        WINDOW_ZOOM_OUT => emit_action(app, "zoom-out"),
         HELP_GETTING_STARTED => emit_action(app, "help-getting-started"),
         HELP_SHORTCUTS => emit_action(app, "help-shortcuts"),
         HELP_COMMANDS => emit_action(app, "help-commands"),

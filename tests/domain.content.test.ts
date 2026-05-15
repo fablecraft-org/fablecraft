@@ -3,6 +3,7 @@ import {
   canCreateCardsFromContent,
   contentJsonForPlainText,
   contentPreview,
+  contentTitlePreview,
   contentText,
   mergeCardContentJson,
   trimTrailingEmptyParagraphs,
@@ -82,6 +83,27 @@ describe("document content rules", () => {
     });
 
     expect(contentText(contentJson)).toBe("Plan\n\n- First point\n- Second point");
+    expect(contentTitlePreview(contentJson)).toBe("Plan");
+  });
+
+  it("derives overview titles from the first non-empty content line", () => {
+    const contentJson = JSON.stringify({
+      content: [
+        { type: "paragraph" },
+        {
+          content: [{ text: "Opening Image", type: "text" }],
+          type: "heading",
+        },
+        {
+          content: [{ text: "Later body", type: "text" }],
+          type: "paragraph",
+        },
+      ],
+      type: "doc",
+    });
+
+    expect(contentTitlePreview(contentJson)).toBe("Opening Image");
+    expect(contentTitlePreview(NEW_CARD_EDITOR_DOCUMENT_JSON)).toBe("Empty card");
   });
 
   it("treats malformed JSON as empty content without throwing", () => {

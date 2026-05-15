@@ -89,6 +89,7 @@ This brief translates it into **buildable engineering instructions**.
 - centering logic
 - bounded stage-style workspace
 - full-tree rendering with overflow-hidden clipping
+- transient Cmd/Ctrl zoom shortcut overview state that uses a separate structural tree layout with compact title-only card shells, fixed scaling, and connector lines
 - fixed viewport with no scrollbars
 - macOS title bar uses overlay chrome with a top drag region; native app/window theme and desktop document shell backgrounds sync to the active light/dark app background
 - border-only mode indication
@@ -269,8 +270,7 @@ animation: ~140ms ease-in-out
 - increased internal card padding still preserves the same active vs inactive footprint
 - focused and unfocused cards keep the same footprint
 - cards use shadow rather than visible borders
-- navigation focus is conveyed by a darker shadow on the selected card
-- editing mode deepens the selected card shadow further so it feels elevated
+- navigation focus uses the same elevated shadow as the selected editing card
 - dark theme card shadows are disabled; card visibility comes from lighter card-surface tokens, with an even lighter editing surface
 - card number labels use a theme token with a lighter dark-mode value
 - neighborhood cards keep full text contrast and a soft shadow
@@ -282,7 +282,18 @@ animation: ~140ms ease-in-out
 - the workspace renders that reserved slot as an invisible click target rather than a visible placeholder, and may use it to create the first child when card creation is allowed
 - no nested scroll
 - no scrollbars
-- wheel / trackpad panning moves the stage
+- wheel / trackpad panning moves the normal writing stage
+- Cmd/Ctrl+- enters overview, renders every card as a compact first-line title with up to two visible lines, starts with the active card centered, and uses the fixed overview scale defined in `DocumentWorkspace`
+- overview uses `overviewTreeLayout` rather than normal `stageLayout`; cards have fixed dimensions, columns follow tree depth, parent/child columns have extra horizontal space, and parent-to-child Bezier connector paths render behind the cards
+- overview connector strokes use warm gray theme tokens, with the selected card's descendant subtree edges and ancestor-path edges using the darker active connector token
+- overview always uses the same fixed scale no matter which card opened it; card navigation inside overview must not recalculate scale, and wheel / trackpad gestures pan the overview graph without changing focus
+- overview centers child groups around their parent where possible and caps adjacent child sibling center gaps at 200px
+- wheel / trackpad gestures pan the normal stage or overview graph depending on the current mode; they must not enter or exit overview
+- Cmd/Ctrl++, the `Zoomed In` command, and the native Window > Zoomed In menu action exit overview and restore the normal rich-card stage around the selected card
+- Cmd/Ctrl+-, the `Zoomed Out` command, and the native Window > Zoomed Out menu action enter overview
+- exiting overview after selecting a different card must remeasure the newly active full-size card before relying on its height for sibling spacing
+- normal rich-card layout must use content-based height estimates for cards whose DOM measurements are not available yet, so long cards are never packed using the minimum card height after returning from overview
+- card height measurement must use transform-independent layout dimensions (`offsetHeight` / `scrollHeight`), not transformed bounding boxes, because overview scale transitions can otherwise cache undersized heights and collapse normal spacing
 
 ### Single-plane model
 - the desktop editor exposes no layer UI or layer model
@@ -314,15 +325,19 @@ animation: ~140ms ease-in-out
 ### Command + Search
 - Cmd/Ctrl+K opens a centered command palette
 - desktop builds expose native Fablecraft / File / Edit / Card / Tools / Window / Help menus
+- native File includes Open Recent after Open Document
 - native File groups import and export together
 - native Undo / Redo target the active editor in editing mode and the navigation history stack in navigation mode
 - native Card actions reuse the same structural operations as keyboard shortcuts
 - native Tools includes Enable Codex and Enable Claude Desktop alongside palette and search
 - native Fablecraft menu includes Check for Updates
-- native Window includes Reload, Minimize, and Toggle Full Screen only
+- native Window includes Reload, Zoomed In, Zoomed Out, Minimize, and Toggle Full Screen
 - the palette shows at most five filtered results and stays input-focused until dismissed
+- the palette input opts out of spellcheck, autocorrect, autocomplete, and autocapitalization so WebKit text-assistance popovers do not cover command results
 - Show Command List, Settings, Enable Codex, and Enable Claude Desktop are the leading default commands
+- the command palette exposes Open Recent; the action opens a focused overlay backed by the same capped five-path local history as startup
 - the command palette exposes Check for Updates
+- the command palette exposes Zoomed In and Zoomed Out, reusing the same actions as the native Window menu and zoom keyboard shortcuts
 - the help sheet lists both Show Command List and Show Shortcuts
 - the help sheet includes the merge shortcuts and merge command labels
 - the command palette exposes Merge with Above and Merge Below when the active card has sibling targets
@@ -416,7 +431,7 @@ Settings presentation:
 - `HelpSheet` should use the same surface and shadow treatment as Settings/Search overlays so support panels read as one coherent family.
 - Help support surfaces should include a `getting-started` mode reachable from the native Help menu, command palette, and the startup surface.
 - The startup and booting panels should visually mirror the website hero wordmark treatment instead of using a separate desktop-only title style.
-- Startup should read recent-document history only to populate an `Open Recent` path into a dedicated recent-files submenu; bootstrap should no longer auto-open any document.
+- Startup, the command palette, and the native File menu should read recent-document history to populate an `Open Recent` path into a dedicated recent-files surface; bootstrap should no longer auto-open any document.
 - Recent-document history should store up to five deduplicated paths in recency order while preserving the legacy single-path key as a compatibility fallback.
 - `StartupPanel` should use `Structured Thought, Locally Crafted.` as its sole tagline, rendered below the horizontal rule in a lighter uppercase style with `Locally Crafted.` on a second line, and implement stable row-based keyboard focus so up/down arrows move between rows, `Escape` returns from the recent-files submenu, and the row chevron stays tied to the current selection state.
 Tree editing:

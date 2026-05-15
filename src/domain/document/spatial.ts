@@ -34,6 +34,26 @@ export interface StageLayoutResult {
   emptyChildGap: StageEmptyChildGapLayout | null;
 }
 
+export interface OverviewTreeLayoutOptions {
+  cardHeight: number;
+  cardWidth: number;
+  columnGap: number;
+  maxSiblingCenterGap: number;
+  preferredSiblingCenterGap: number;
+  siblingGap: number;
+}
+
+export interface OverviewTreeConnectorLayout {
+  childCardId: string;
+  path: string;
+  parentCardId: string;
+}
+
+export interface OverviewTreeLayoutResult {
+  cards: StageCardLayout[];
+  connectors: OverviewTreeConnectorLayout[];
+}
+
 function sortedChildren(cards: CardRecord[], parentId: string | null) {
   return cards
     .filter((card) => card.parentId === parentId)
@@ -56,6 +76,33 @@ function descendantIdsOfCard(cards: CardRecord[], cardId: string) {
   }
 
   return descendants;
+}
+
+function depthByCardId(cards: CardRecord[]) {
+  const depths = new Map<string, number>();
+
+  function resolveDepth(card: CardRecord): number {
+    const existingDepth = depths.get(card.id);
+
+    if (existingDepth !== undefined) {
+      return existingDepth;
+    }
+
+    if (!card.parentId) {
+      depths.set(card.id, 0);
+      return 0;
+    }
+
+    const parent = cards.find((candidate) => candidate.id === card.parentId);
+    const depth = parent ? resolveDepth(parent) + 1 : 0;
+
+    depths.set(card.id, depth);
+    return depth;
+  }
+
+  cards.forEach((card) => resolveDepth(card));
+
+  return depths;
 }
 
 export function ancestorsOfCard(cards: CardRecord[], cardId: string) {
@@ -115,6 +162,145 @@ export function treeLayout(cards: CardRecord[]) {
         left.row - right.row ||
         left.cardId.localeCompare(right.cardId),
     );
+}
+
+export function overviewTreeLayout(
+  cards: CardRecord[],
+  activeCardId: string,
+  options: OverviewTreeLayoutOptions,
+): OverviewTreeLayoutResult {
+  const positions = treeLayout(cards);
+  const activePosition = positions.find((position) => position.cardId === activeCardId);
+
+  if (!activePosition) {
+    return {
+      cards: [],
+      connectors: [],
+    };
+  }
+
+  const depths = depthByCardId(cards);
+  const activeDepth = depths.get(activeCardId) ?? activePosition.column;
+  const cardsByColumn = new Map<number, SpatialCardPosition[]>();
+  const yByCard = new Map<string, number>();
+  const centerGap = Math.min(
+    options.maxSiblingCenterGap,
+    Math.max(options.cardHeight + options.siblingGap, options.preferredSiblingCenterGap),
+  );
+
+  positions.forEach((position) => {
+    const columnCards = cardsByColumn.get(position.column) ?? [];
+    columnCards.push(position);
+    cardsByColumn.set(position.column, columnCards);
+  });
+
+  cardsByColumn.forEach((columnCards) => {
+    columnCards.sort(
+      (left, right) =>
+        left.row - right.row || left.cardId.localeCompare(right.cardId),
+    );
+  });
+
+  const rootColumnCards = cardsByColumn.get(0) ?? [];
+  const rootGroupHeight = Math.max(0, (rootColumnCards.length - 1) * centerGap);
+
+  rootColumnCards.forEach((card, index) => {
+    yByCard.set(card.cardId, index * centerGap - rootGroupHeight / 2);
+  });
+
+  const maxColumn = Math.max(...positions.map((position) => position.column));
+
+  for (let column = 1; column <= maxColumn; column += 1) {
+    const columnCards = cardsByColumn.get(column) ?? [];
+    const parentColumnCards = cardsByColumn.get(column - 1) ?? [];
+    const desiredCenters = new Map<string, number>();
+
+    parentColumnCards.forEach((parentPosition) => {
+      const parentY = yByCard.get(parentPosition.cardId);
+
+      if (parentY === undefined) {
+        return;
+      }
+
+      const childCards = sortedChildren(cards, parentPosition.cardId).filter(
+        (child) => positions.find((position) => position.cardId === child.id)?.column === column,
+      );
+      const childGroupHeight = Math.max(0, (childCards.length - 1) * centerGap);
+
+      childCards.forEach((child, index) => {
+        desiredCenters.set(child.id, parentY + index * centerGap - childGroupHeight / 2);
+      });
+    });
+
+    packColumn(
+      columnCards,
+      desiredCenters,
+      options.siblingGap,
+      () => options.cardHeight,
+    ).forEach((value, key) => yByCard.set(key, value));
+  }
+
+  const activeY = yByCard.get(activeCardId) ?? 0;
+  yByCard.forEach((value, key) => {
+    yByCard.set(key, value - activeY);
+  });
+
+  const columnWidth = options.cardWidth + options.columnGap;
+  const layoutByCardId = new Map<string, StageCardLayout>();
+  const laidOutCards = positions.map((position) => {
+    const cardDepth = depths.get(position.cardId) ?? position.column;
+    const layout = {
+      cardId: position.cardId,
+      height: options.cardHeight,
+      isActive: position.cardId === activeCardId,
+      isNeighborhood: true,
+      x: (cardDepth - activeDepth) * columnWidth,
+      y: yByCard.get(position.cardId) ?? 0,
+    };
+
+    layoutByCardId.set(position.cardId, layout);
+    return layout;
+  });
+
+  const connectors: OverviewTreeConnectorLayout[] = [];
+
+  cards.forEach((parent) => {
+    const parentLayout = layoutByCardId.get(parent.id);
+
+    if (!parentLayout) {
+      return;
+    }
+
+    sortedChildren(cards, parent.id).forEach((child) => {
+      const childLayout = layoutByCardId.get(child.id);
+
+      if (!childLayout) {
+        return;
+      }
+
+      const startX = parentLayout.x + options.cardWidth / 2;
+      const startY = parentLayout.y;
+      const endX = childLayout.x - options.cardWidth / 2;
+      const endY = childLayout.y;
+      const controlDistance = Math.max(72, Math.abs(endX - startX) * 0.42);
+
+      connectors.push({
+        childCardId: child.id,
+        parentCardId: parent.id,
+        path: [
+          `M ${startX} ${startY}`,
+          `C ${startX + controlDistance} ${startY}`,
+          `${endX - controlDistance} ${endY}`,
+          `${endX} ${endY}`,
+        ].join(" "),
+      });
+    });
+  });
+
+  return {
+    cards: laidOutCards,
+    connectors,
+  };
 }
 
 function packColumn(

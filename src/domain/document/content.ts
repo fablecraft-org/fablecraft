@@ -75,6 +75,19 @@ export function contentPreview(contentJson: string, maxLength = 96) {
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+export function contentTitlePreview(contentJson: string, maxLength = 56) {
+  const text = contentText(contentJson)
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0) ?? "";
+
+  if (text.length <= maxLength) {
+    return text || "Empty card";
+  }
+
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
 export function contentJsonForPlainText(text: string) {
   const normalizedText = text.replace(/\r\n/g, "\n");
 

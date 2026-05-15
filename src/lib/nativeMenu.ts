@@ -21,6 +21,7 @@ export type NativeMenuAction =
   | "merge-with-above"
   | "new-document"
   | "open-document"
+  | "open-recent"
   | "redo"
   | "save"
   | "search"
@@ -28,7 +29,9 @@ export type NativeMenuAction =
   | "shift-down"
   | "shift-up"
   | "split"
-  | "undo";
+  | "undo"
+  | "zoom-in"
+  | "zoom-out";
 
 interface NativeMenuActionPayload {
   action: NativeMenuAction;

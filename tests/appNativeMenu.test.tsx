@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/app/App";
 import { useAppStore } from "../src/state/appStore";
-import type { NativeMenuAction } from "../src/lib/nativeMenu";
+import { FRONTEND_MENU_ACTION_EVENT, type NativeMenuAction } from "../src/lib/nativeMenu";
 
 const mocks = vi.hoisted(() => ({
   enableClaudeDesktopIntegration: vi.fn(),
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   forceSaveCurrentDocument: vi.fn(),
   listen: vi.fn(),
   loadLocalIntegrationStatuses: vi.fn(),
+  openDocumentAtPath: vi.fn(),
   promptForNewDocument: vi.fn(),
   promptForOpenDocument: vi.fn(),
   unlisten: vi.fn(),
@@ -37,6 +38,10 @@ vi.mock("../src/storage/integrations", () => ({
 
 vi.mock("../src/storage/forceSave", () => ({
   forceSaveCurrentDocument: () => mocks.forceSaveCurrentDocument(),
+}));
+
+vi.mock("../src/storage/documents", () => ({
+  openDocumentAtPath: (path: string) => mocks.openDocumentAtPath(path),
 }));
 
 vi.mock("../src/components/DocumentWorkspace", () => ({
@@ -89,6 +94,7 @@ describe("App native menu handling", () => {
     mocks.forceSaveCurrentDocument.mockReset();
     mocks.listen.mockReset();
     mocks.loadLocalIntegrationStatuses.mockReset();
+    mocks.openDocumentAtPath.mockReset();
     mocks.promptForNewDocument.mockReset();
     mocks.promptForOpenDocument.mockReset();
     mocks.unlisten.mockReset();
@@ -117,6 +123,14 @@ describe("App native menu handling", () => {
       },
     });
     mocks.forceSaveCurrentDocument.mockResolvedValue(null);
+    mocks.openDocumentAtPath.mockImplementation((path: string) =>
+      Promise.resolve({
+        documentId: "recent-doc",
+        name: "Recent Story",
+        openedAtMs: 3,
+        path,
+      }),
+    );
     resetAppStore();
   });
 
@@ -305,6 +319,170 @@ describe("App native menu handling", () => {
         path: "/tmp/story.fable",
       });
     });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens recent documents from the native menu", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    window.localStorage.setItem(
+      "fablecraft:recent-document-paths",
+      JSON.stringify(["/tmp/novel-draft.fable", "/tmp/essay-plan.fable"]),
+    );
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    await act(async () => {
+      dispatchNativeMenuAction("open-recent");
+    });
+
+    expect(container.textContent).toContain("Open Recent");
+    expect(container.textContent).toContain("novel-draft");
+    expect(container.textContent).toContain("essay-plan");
+
+    const recentDocument = Array.from(container.querySelectorAll("button")).find((node) =>
+      node.textContent?.includes("novel-draft"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      recentDocument.click();
+    });
+
+    expect(mocks.openDocumentAtPath).toHaveBeenCalledWith("/tmp/novel-draft.fable");
+    expect(useAppStore.getState().activeDocument?.path).toBe("/tmp/novel-draft.fable");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens recent documents from the command palette", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    window.localStorage.setItem(
+      "fablecraft:recent-document-paths",
+      JSON.stringify(["/tmp/novel-draft.fable", "/tmp/essay-plan.fable"]),
+    );
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    await act(async () => {
+      useAppStore.setState({
+        activeDocument: {
+          documentId: "doc-1",
+          name: "Story",
+          openedAtMs: 1,
+          path: "/tmp/story.fable",
+        },
+        mode: "navigation",
+        notice: null,
+        screen: "workspace",
+      });
+    });
+
+    await act(async () => {
+      dispatchNativeMenuAction("command-palette");
+    });
+
+    const commandInput = container.querySelector("input") as HTMLInputElement;
+
+    expect(commandInput.getAttribute("autocomplete")).toBe("off");
+    expect(commandInput.getAttribute("autocapitalize")).toBe("none");
+    expect(commandInput.getAttribute("autocorrect")).toBe("off");
+    expect(commandInput.getAttribute("spellcheck")).toBe("false");
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        commandInput,
+        "recent",
+      );
+      commandInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const openRecentCommand = Array.from(container.querySelectorAll("button")).find((node) =>
+      node.textContent?.includes("Open Recent"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      openRecentCommand.click();
+    });
+
+    expect(container.textContent).toContain("novel-draft");
+    expect(container.textContent).toContain("essay-plan");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("exposes zoom commands from the command palette", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const frontendActions: NativeMenuAction[] = [];
+    const handleFrontendAction = (event: Event) => {
+      const action = (event as CustomEvent<{ action: NativeMenuAction }>).detail.action;
+      frontendActions.push(action);
+    };
+
+    window.addEventListener(FRONTEND_MENU_ACTION_EVENT, handleFrontendAction);
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    await act(async () => {
+      useAppStore.setState({
+        activeDocument: {
+          documentId: "doc-1",
+          name: "Story",
+          openedAtMs: 1,
+          path: "/tmp/story.fable",
+        },
+        mode: "navigation",
+        notice: null,
+        screen: "workspace",
+      });
+    });
+
+    await act(async () => {
+      dispatchNativeMenuAction("command-palette");
+    });
+
+    const commandInput = container.querySelector("input") as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        commandInput,
+        "zoom",
+      );
+      commandInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Zoomed In");
+    expect(container.textContent).toContain("Zoomed Out");
+
+    const zoomedOutCommand = Array.from(container.querySelectorAll("button")).find((node) =>
+      node.textContent?.includes("Zoomed Out"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      zoomedOutCommand.click();
+    });
+
+    expect(frontendActions).toContain("zoom-out");
+    expect(useAppStore.getState().mode).toBe("navigation");
+
+    window.removeEventListener(FRONTEND_MENU_ACTION_EVENT, handleFrontendAction);
 
     await act(async () => {
       root.unmount();

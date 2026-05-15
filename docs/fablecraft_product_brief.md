@@ -185,6 +185,23 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - Children: right column
 - Siblings: above and below the active card
 - all cards remain rendered in the stage unless they are off-screen
+- Cmd/Ctrl+- enters a structural overview state that uses compact, fixed-size title-only card shells at a fixed zoom level
+- overview title shells are wide enough for short titles and may wrap title text across two lines
+- overview breaks away from normal writing-view packing rules so it can show how the tree forks by depth
+- overview draws parent-to-child Bezier connector lines from the right edge of each parent shell to the left edge of each child shell
+- overview connector lines use warm gray theme tokens
+- overview darkens connector lines along the selected card's parent chain and throughout the selected card's descendant subtree
+- overview uses larger horizontal spacing between parent and child columns than the normal view
+- overview opens with the current card centered; selecting another overview card recenters the structural map around that card, while trackpad / wheel panning may move the map away from center
+- overview centers child groups around their parent where possible, while keeping adjacent child sibling centers no more than 200px apart
+- overview uses the same fixed zoom level regardless of which card opened it; navigating between cards does not rescale the overview
+- trackpad / wheel gestures do not trigger overview; once overview is open they pan the structural graph without changing the selected card
+- Cmd/Ctrl++, the `Zoomed In` command, and Window > Zoomed In exit overview and return to the normal rich card view centered on the selected card
+- Cmd/Ctrl+-, the `Zoomed Out` command, and Window > Zoomed Out open the whole-tree overview
+- overview may leave distant parts of the tree outside the viewport when the centered structural map is larger than the window
+- returning from overview restores the normal rich-card spacing without temporarily packing long neighboring cards as minimum-height cards
+- overview titles are derived from the first non-empty line of each card's existing content; cards still do not have separate persisted titles
+- clicking a card in overview selects it as the return target without entering text editing
 - cards in the active neighborhood use a slightly lighter border when not selected
 - cards outside the active neighborhood keep the same text and surface color, but lose shadow emphasis
 - dark theme cards use lighter box surfaces instead of shadows; the selected editing card becomes lighter again
@@ -216,6 +233,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - the active card keeps the same content box and text reflow between navigation and edit mode
 - cards keep generous internal padding without changing footprint across modes
 - card content padding is expanded by 10px to increase breathing room
+- the focused card uses the elevated active shadow in navigation mode and editing mode so focus is clear before typing begins
 - focused cards do not resize just because they are selected
 - focused and unfocused cards keep the same footprint
 - selected cards keep the same thin border as unselected cards
@@ -230,7 +248,8 @@ Up/down follows the packed spatial column, even across different parent groups. 
   - center
   - enter edit mode
   - cursor placed near click
-- trackpad / wheel gestures pan the bounded stage without showing scrollbars
+- trackpad / wheel gestures pan the bounded normal stage and the overview graph without showing scrollbars
+- Cmd/Ctrl+-, `Zoomed Out`, and Window > Zoomed Out open the whole-tree overview; Cmd/Ctrl++, `Zoomed In`, and Window > Zoomed In restore the normal stage
 
 ### Animation
 
@@ -261,6 +280,7 @@ Behavior:
 - arrows navigate
 - Enter executes
 - Escape closes
+- command input disables spellcheck, autocorrect, and autocapitalization so text-assistance popovers do not cover results
 - settings are opened from here as a centered modal
 
 Commands:
@@ -274,6 +294,7 @@ Document:
 
 - New Document
 - Open Document
+- Open Recent
 - Import Markdown
 - Export Level (MD / HTML)
 
@@ -281,6 +302,11 @@ Structure:
 
 - Merge with Above
 - Merge Below
+
+View:
+
+- Zoomed In
+- Zoomed Out
 
 Integrations:
 
@@ -316,6 +342,7 @@ Desktop builds expose native menus with the following structure:
 
 - New Document
 - Open Document
+- Open Recent
 - Save
 - Import Markdown
 - Export Markdown
@@ -352,6 +379,8 @@ Import and export should appear together as a grouped block.
 ### Window
 
 - Reload
+- Zoomed In
+- Zoomed Out
 - Minimize
 - Toggle Full Screen
 
@@ -404,8 +433,10 @@ All UI values must be configurable tokens.
 
 ## 12. Startup Behavior
 
-- reopen last document if exists
-- otherwise show centered panel:
+- always show the centered startup panel instead of auto-reopening a document
+- show Open Recent when recent documents exist
+- Open Recent presents up to five `.fable` files ordered by recency
+- always show:
   - New
   - Open
   - Import
@@ -560,6 +591,7 @@ Settings clarity:
 - `Locally Crafted.` should render on its own line in the startup tagline.
 - The app should always open on the startup surface rather than auto-reopening a document.
 - If recent documents are known, the startup surface should show an `Open Recent` option that opens a dedicated recent-files panel with up to five `.fable` files ordered by recency.
+- The command palette and native File menu should expose `Open Recent`; selecting it should present the same five-item recent-document history.
 - The recent-files panel should include a final `Back` option, and `Escape` should also return to the main startup menu.
 - The startup surface should be keyboard-friendly: focus should land on the first row, the chevron should stay aligned to the current row, and up/down arrows should move between rows.
 Editing behavior:

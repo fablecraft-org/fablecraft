@@ -74,6 +74,12 @@ describe("settings persistence", () => {
     expect(
       document.documentElement.style.getPropertyValue("--fc-color-card-label"),
     ).toBe("rgba(244, 244, 241, 0.68)");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-overview-connector"),
+    ).toBe("#5c6066");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-overview-connector-active"),
+    ).toBe("#464a51");
 
     useSettingsStore.getState().setTheme("light");
 
@@ -86,6 +92,12 @@ describe("settings persistence", () => {
     expect(
       document.documentElement.style.getPropertyValue("--fc-color-card-label"),
     ).toBe("rgba(23, 20, 18, 0.34)");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-overview-connector"),
+    ).toBe("#e1dbd6");
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-color-overview-connector-active"),
+    ).toBe("#b2aaa3");
   });
 
   it("restores stored preferences on a fresh load", () => {

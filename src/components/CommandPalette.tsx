@@ -69,6 +69,9 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
         }}
       >
         <input
+          autoCapitalize="none"
+          autoComplete="off"
+          autoCorrect="off"
           className="w-full bg-[var(--fc-color-surface-strong)] px-4 py-3 font-[var(--fc-font-ui)] text-base text-[var(--fc-color-text)] shadow-[var(--fc-shadow-soft)] outline-none transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
@@ -106,6 +109,7 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
           }}
           placeholder="Type a command"
           ref={inputRef}
+          spellCheck={false}
           value={query}
         />
 

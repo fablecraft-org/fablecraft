@@ -2,6 +2,7 @@ import {
   ancestorsOfCard,
   childrenOfCard,
   nextCardInColumn,
+  overviewTreeLayout,
   previousCardInColumn,
   siblingsOfCard,
   stageLayout,
@@ -60,6 +61,72 @@ describe("document spatial helpers", () => {
       { cardId: "card-b", column: 1, row: 1 },
       { cardId: "card-a-1", column: 2, row: 0 },
     ]);
+  });
+
+  it("lays out overview as a fixed-card tree around the active card", () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push({
+      documentId: "doc-1",
+      id: "card-c",
+      orderIndex: 2,
+      parentId: "card-root",
+      type: "card",
+    });
+
+    const overview = overviewTreeLayout(snapshot.cards, "card-root", {
+      cardHeight: 60,
+      cardWidth: 200,
+      columnGap: 160,
+      maxSiblingCenterGap: 200,
+      preferredSiblingCenterGap: 180,
+      siblingGap: 20,
+    });
+
+    expect(overview.cards.find((card) => card.cardId === "card-root")).toMatchObject({
+      x: 0,
+      y: 0,
+    });
+    expect(overview.cards.find((card) => card.cardId === "card-a")).toMatchObject({
+      x: 360,
+      y: -180,
+    });
+    expect(overview.cards.find((card) => card.cardId === "card-b")).toMatchObject({
+      x: 360,
+      y: 0,
+    });
+    expect(overview.cards.find((card) => card.cardId === "card-c")).toMatchObject({
+      x: 360,
+      y: 180,
+    });
+    expect(overview.connectors.find((connector) => connector.childCardId === "card-a")?.path).toBe(
+      "M 100 0 C 172 0 188 -180 260 -180",
+    );
+  });
+
+  it("recenters overview around the selected card", () => {
+    const snapshot = makeDocumentSnapshot();
+
+    const overview = overviewTreeLayout(snapshot.cards, "card-a", {
+      cardHeight: 60,
+      cardWidth: 200,
+      columnGap: 160,
+      maxSiblingCenterGap: 200,
+      preferredSiblingCenterGap: 180,
+      siblingGap: 20,
+    });
+
+    expect(overview.cards.find((card) => card.cardId === "card-a")).toMatchObject({
+      x: 0,
+      y: 0,
+    });
+    expect(overview.cards.find((card) => card.cardId === "card-root")).toMatchObject({
+      x: -360,
+      y: 90,
+    });
+    expect(overview.cards.find((card) => card.cardId === "card-b")).toMatchObject({
+      x: 0,
+      y: 180,
+    });
   });
 
   it("moves vertically within the current column", () => {

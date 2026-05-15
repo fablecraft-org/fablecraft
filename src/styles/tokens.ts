@@ -30,6 +30,8 @@ const themeTokens = {
     noticeText: "#f4f4f1",
     onDark: "#fff7f1",
     overlayBackdrop: "rgba(245, 236, 230, 0.82)",
+    overviewConnector: "#e1dbd6",
+    overviewConnectorActive: "#b2aaa3",
     shadowCard: "0 12px 28px rgba(23, 20, 18, 0.08)",
     shadowElevated: "0 18px 40px rgba(23, 20, 18, 0.14)",
     shadowSoft: "0 8px 18px rgba(23, 20, 18, 0.08)",
@@ -52,6 +54,8 @@ const themeTokens = {
     noticeText: "#f4f4f1",
     onDark: "#18191b",
     overlayBackdrop: "rgba(12, 13, 15, 0.72)",
+    overviewConnector: "#5c6066",
+    overviewConnectorActive: "#464a51",
     shadowCard: "none",
     shadowElevated: "none",
     shadowSoft: "none",
@@ -74,6 +78,8 @@ const themeTokens = {
   noticeText: string;
   onDark: string;
   overlayBackdrop: string;
+  overviewConnector: string;
+  overviewConnectorActive: string;
   shadowCard: string;
   shadowElevated: string;
   shadowSoft: string;
@@ -217,6 +223,8 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-color-notice-text": theme.noticeText,
     "--fc-color-on-dark": theme.onDark,
     "--fc-color-overlay-backdrop": theme.overlayBackdrop,
+    "--fc-color-overview-connector": theme.overviewConnector,
+    "--fc-color-overview-connector-active": theme.overviewConnectorActive,
     "--fc-color-surface": theme.surface,
     "--fc-color-surface-strong": theme.surfaceStrong,
     "--fc-color-text": theme.text,

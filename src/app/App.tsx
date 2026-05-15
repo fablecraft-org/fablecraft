@@ -8,6 +8,7 @@ import { CommandPalette, type CommandPaletteItem } from "../components/CommandPa
 import { DocumentWorkspace } from "../components/DocumentWorkspace";
 import { FeedbackDialog, type FeedbackDialogMode } from "../components/FeedbackDialog";
 import { HelpSheet } from "../components/HelpSheet";
+import { RecentDocumentsOverlay } from "../components/RecentDocumentsOverlay";
 import { SearchOverlay } from "../components/SearchOverlay";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { StartupPanel } from "../components/StartupPanel";
@@ -82,6 +83,7 @@ export function App() {
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [helpSheetMode, setHelpSheetMode] = useState<HelpSheetMode | null>(null);
   const [feedbackDialogMode, setFeedbackDialogMode] = useState<FeedbackDialogMode | null>(null);
+  const [isRecentDocumentsOpen, setRecentDocumentsOpen] = useState(false);
   const [appUpdateDialogStatus, setAppUpdateDialogStatus] =
     useState<AppUpdateDialogStatus | null>(null);
   const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null);
@@ -176,6 +178,7 @@ export function App() {
     setSettingsOpen(false);
     setHelpSheetMode(null);
     setFeedbackDialogMode(null);
+    setRecentDocumentsOpen(false);
   }
 
   function closeAppUpdateDialog() {
@@ -242,6 +245,36 @@ export function App() {
     setOverlayReturnMode(mode === "editing" ? "editing" : "navigation");
     setMode("navigation");
     setSettingsOpen(true);
+  }
+
+  function openRecentDocumentsOverlay() {
+    const nextRecentDocumentPaths = readRecentDocumentPaths();
+    setRecentDocumentPaths(nextRecentDocumentPaths);
+
+    if (nextRecentDocumentPaths.length === 0) {
+      setNotice({
+        tone: "info",
+        message: "No recent documents yet.",
+      });
+      return;
+    }
+
+    closeAuxiliaryOverlays();
+    setOverlayReturnMode(mode === "editing" ? "editing" : "navigation");
+
+    if (screen === "workspace") {
+      setMode("navigation");
+    }
+
+    setRecentDocumentsOpen(true);
+  }
+
+  function closeRecentDocumentsOverlay() {
+    setRecentDocumentsOpen(false);
+
+    if (screen === "workspace") {
+      restoreOverlayMode();
+    }
   }
 
   async function handleForceSave() {
@@ -358,11 +391,19 @@ export function App() {
     function handleGlobalKeyDown(event: KeyboardEvent) {
       if (
         event.key === "Escape" &&
-        (isSettingsOpen || helpSheetMode || feedbackDialogMode || appUpdateDialogStatus)
+        (
+          isSettingsOpen ||
+          helpSheetMode ||
+          feedbackDialogMode ||
+          isRecentDocumentsOpen ||
+          appUpdateDialogStatus
+        )
       ) {
         event.preventDefault();
         if (appUpdateDialogStatus) {
           closeAppUpdateDialog();
+        } else if (isRecentDocumentsOpen) {
+          closeRecentDocumentsOverlay();
         } else {
           closeAuxiliaryOverlays();
           restoreOverlayMode();
@@ -403,6 +444,7 @@ export function App() {
     feedbackDialogMode,
     appUpdateDialogStatus,
     helpSheetMode,
+    isRecentDocumentsOpen,
     isSettingsOpen,
     mode,
     openCommandPalette,
@@ -464,6 +506,8 @@ export function App() {
     if (!path) {
       return;
     }
+
+    setRecentDocumentsOpen(false);
 
     try {
       await forceSaveCurrentDocument();
@@ -619,6 +663,11 @@ export function App() {
       return;
     }
 
+    if (action === "open-recent") {
+      openRecentDocumentsOverlay();
+      return;
+    }
+
     if (action === "import-markdown") {
       void handleImportMarkdown();
       return;
@@ -752,6 +801,18 @@ export function App() {
       run: () => runPaletteAction(() => handleCheckForUpdates({ manual: true })),
     },
     {
+      id: "zoomed-in",
+      keywords: ["zoom", "normal", "writing", "view"],
+      label: "Zoomed In",
+      run: () => runPaletteAction(() => dispatchNativeMenuAction("zoom-in")),
+    },
+    {
+      id: "zoomed-out",
+      keywords: ["zoom", "overview", "tree", "structure", "view"],
+      label: "Zoomed Out",
+      run: () => runPaletteAction(() => dispatchNativeMenuAction("zoom-out")),
+    },
+    {
       id: "enable-codex",
       keywords: ["mcp", "integration", "codex"],
       label: `${integrationStatuses.codex.enabled ? "✓ " : ""}Enable Codex`,
@@ -774,6 +835,12 @@ export function App() {
       keywords: ["reopen"],
       label: "Open Document",
       run: () => runPaletteAction(handleOpenDocument),
+    },
+    {
+      id: "open-recent",
+      keywords: ["reopen", "recent", "last"],
+      label: "Open Recent",
+      run: () => runPaletteAction(openRecentDocumentsOverlay),
     },
     {
       id: "import-markdown",
@@ -875,7 +942,11 @@ export function App() {
           <DocumentWorkspace
             document={activeDocument}
             suspendKeyboard={Boolean(
-              isSettingsOpen || helpSheetMode || feedbackDialogMode || appUpdateDialogStatus,
+              isSettingsOpen ||
+                helpSheetMode ||
+                feedbackDialogMode ||
+                isRecentDocumentsOpen ||
+                appUpdateDialogStatus,
             )}
           />
         )}
@@ -885,6 +956,14 @@ export function App() {
         <CommandPalette
           commands={commandItems}
           onClose={restoreOverlayMode}
+        />
+      )}
+
+      {isRecentDocumentsOpen && (
+        <RecentDocumentsOverlay
+          onClose={closeRecentDocumentsOverlay}
+          onOpenDocument={(path) => void handleOpenRecentDocument(path)}
+          recentDocumentPaths={recentDocumentPaths}
         />
       )}
 
