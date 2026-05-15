@@ -1,6 +1,7 @@
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import StarterKit from "@tiptap/starter-kit";
+import { TextSelection } from "@tiptap/pm/state";
 import { useEffect, useRef } from "react";
 import { trimTrailingEmptyParagraphs } from "../domain/document/content";
 import { EMPTY_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
@@ -58,7 +59,7 @@ function ensureTabKeyListeners() {
   tabKeyListenersAttached = true;
 }
 
-function selectionTextOffsets(editor: NonNullable<ReturnType<typeof useEditor>>) {
+function selectionTextOffsets(editor: Editor) {
   const { doc, selection } = editor.state;
   const before = doc.textBetween(0, selection.from, "\n\n");
   const selected = doc.textBetween(selection.from, selection.to, "\n\n");
@@ -69,16 +70,34 @@ function selectionTextOffsets(editor: NonNullable<ReturnType<typeof useEditor>>)
   };
 }
 
-function editorIsEffectivelyEmpty(editor: NonNullable<ReturnType<typeof useEditor>>) {
+function editorIsEffectivelyEmpty(editor: Editor) {
   return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n").trim().length === 0;
 }
 
-function editorTextLength(editor: NonNullable<ReturnType<typeof useEditor>>) {
+function editorTextLength(editor: Editor) {
   return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n").length;
 }
 
+function insertParagraphAfterCurrentBlock(editor: Editor) {
+  const { state, view } = editor;
+  const paragraph = state.schema.nodes.paragraph?.create();
+
+  if (!paragraph) {
+    return false;
+  }
+
+  const insertPosition = state.selection.$from.after();
+  let transaction = state.tr.insert(insertPosition, paragraph);
+  transaction = transaction
+    .setSelection(TextSelection.near(transaction.doc.resolve(insertPosition + 1)))
+    .scrollIntoView();
+
+  view.dispatch(transaction);
+  return true;
+}
+
 function selectionIsInTrailingEmptyBlock(
-  editor: NonNullable<ReturnType<typeof useEditor>>,
+  editor: Editor,
 ) {
   const { doc, selection } = editor.state;
 
@@ -90,7 +109,7 @@ function selectionIsInTrailingEmptyBlock(
 }
 
 function trimTrailingEmptyLineFromEditor(
-  editor: NonNullable<ReturnType<typeof useEditor>>,
+  editor: Editor,
 ) {
   const currentContentJson = JSON.stringify(editor.getJSON());
   const trimmedContentJson = trimTrailingEmptyParagraphs(currentContentJson);
@@ -148,6 +167,7 @@ export function CardEditor({
   ensureTabKeyListeners();
   const tabHeldRef = useRef(tabKeyHeldAcrossEditors);
   const wasEditingRef = useRef(false);
+  const editorRef = useRef<Editor | null>(null);
   const isTabHeld = () => tabHeldRef.current || tabKeyHeldAcrossEditors;
   const editor = useEditor({
     autofocus: false,
@@ -157,8 +177,10 @@ export function CardEditor({
         class:
           "fc-editor w-full min-h-[1.5rem] outline-none font-[var(--fc-font-content)] text-[length:var(--fc-content-size)] leading-[var(--fc-content-line-height)] text-[var(--fc-color-text)]",
       },
-      handleKeyDown(_, event) {
-        if (!editor) {
+      handleKeyDown(_, event): boolean {
+        const currentEditor = editorRef.current;
+
+        if (!currentEditor) {
           return false;
         }
 
@@ -238,15 +260,15 @@ export function CardEditor({
         }
 
         if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-          const offsets = selectionTextOffsets(editor);
+          const offsets = selectionTextOffsets(currentEditor);
           const direction = event.key === "ArrowUp" ? "up" : "down";
 
           if (
-            editor.state.selection.empty &&
+            currentEditor.state.selection.empty &&
             isSelectionAtCardBoundary(
               offsets.start,
               offsets.end,
-              editorTextLength(editor),
+              editorTextLength(currentEditor),
               direction,
             )
           ) {
@@ -261,14 +283,14 @@ export function CardEditor({
         }
 
         if (event.key === "ArrowRight") {
-          const offsets = selectionTextOffsets(editor);
+          const offsets = selectionTextOffsets(currentEditor);
 
           if (
-            editor.state.selection.empty &&
+            currentEditor.state.selection.empty &&
             isSelectionAtCardBoundary(
               offsets.start,
               offsets.end,
-              editorTextLength(editor),
+              editorTextLength(currentEditor),
               "right",
             )
           ) {
@@ -286,7 +308,7 @@ export function CardEditor({
           event.metaKey === false &&
           event.ctrlKey === false &&
           event.altKey === false &&
-          editorIsEffectivelyEmpty(editor)
+          editorIsEffectivelyEmpty(currentEditor)
         ) {
           event.preventDefault();
           onDeleteEmpty();
@@ -298,8 +320,8 @@ export function CardEditor({
           event.metaKey === false &&
           event.ctrlKey === false &&
           event.altKey === false &&
-          selectionIsInTrailingEmptyBlock(editor) &&
-          trimTrailingEmptyLineFromEditor(editor)
+          selectionIsInTrailingEmptyBlock(currentEditor) &&
+          trimTrailingEmptyLineFromEditor(currentEditor)
         ) {
           event.preventDefault();
           return true;
@@ -319,27 +341,35 @@ export function CardEditor({
               return true;
             }
 
-            const offsets = selectionTextOffsets(editor);
+            const offsets = selectionTextOffsets(currentEditor);
             onSplitAtSelection(offsets.start, offsets.end);
             return true;
           }
 
           const isEmptyHeading =
-            editor.state.selection.empty &&
-            editor.state.selection.$from.parent.type.name === "heading" &&
-            editor.state.selection.$from.parent.textContent.trim() === "";
+            currentEditor.state.selection.empty &&
+            currentEditor.state.selection.$from.parent.type.name === "heading" &&
+            currentEditor.state.selection.$from.parent.textContent.trim() === "";
 
           if (isEmptyHeading) {
             event.preventDefault();
-            editor.commands.setContent(JSON.parse(EMPTY_EDITOR_DOCUMENT_JSON));
-            editor.commands.focus("end");
+            currentEditor.commands.setContent(JSON.parse(EMPTY_EDITOR_DOCUMENT_JSON));
+            currentEditor.commands.focus("end");
             return true;
           }
 
+          if (
+            currentEditor.state.selection.empty &&
+            currentEditor.state.selection.$from.parent.type.name === "heading"
+          ) {
+            event.preventDefault();
+            return insertParagraphAfterCurrentBlock(currentEditor);
+          }
+
           const isEmptyParagraph =
-            editor.state.selection.empty &&
-            editor.state.selection.$from.parent.type.name === "paragraph" &&
-            editor.state.selection.$from.parent.textContent.trim() === "";
+            currentEditor.state.selection.empty &&
+            currentEditor.state.selection.$from.parent.type.name === "paragraph" &&
+            currentEditor.state.selection.$from.parent.textContent.trim() === "";
 
           if (isEmptyParagraph) {
             event.preventDefault();
@@ -376,6 +406,8 @@ export function CardEditor({
       onUpdateContent(JSON.stringify(nextEditor.getJSON()));
     },
   });
+
+  editorRef.current = editor;
 
   useEffect(() => {
     if (!editor) {

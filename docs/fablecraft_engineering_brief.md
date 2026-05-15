@@ -249,6 +249,7 @@ animation: ~140ms ease-in-out
 - Tab+Arrow navigates nearby cards, places the caret at the end of the destination card, and stays in edit mode
 - Tab+Arrow creates a card in the pointed direction when no nearby destination card exists in edit mode
 - Enter in an empty new-card heading converts the single heading line to a paragraph and does not create a sibling
+- Enter in a non-empty heading inserts a regular paragraph below the heading without creating a sibling or converting the heading itself
 - Option+Up / Down in edit mode merges with the sibling above or below without leaving edit mode
 - markdown shortcuts render correctly, including visible list and heading styling
 - preview mode preserves heading and list structure after a card is deselected

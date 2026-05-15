@@ -213,6 +213,62 @@ describe("CardEditor keyboard behavior", () => {
     });
   });
 
+  it("keeps a written heading and starts regular text below on Enter", async () => {
+    const { container, props, root } = renderEditor({
+      contentJson: JSON.stringify({
+        content: [
+          {
+            attrs: { level: 1 },
+            content: [{ text: "Scene title", type: "text" }],
+            type: "heading",
+          },
+        ],
+        type: "doc",
+      }),
+      focusPlacement: "end",
+    });
+
+    await act(async () => {
+      root.render(<CardEditor {...props} />);
+    });
+
+    const editorElement = container.querySelector(".ProseMirror") as HTMLElement | null;
+
+    expect(editorElement?.querySelector("h1")?.textContent).toBe("Scene title");
+    expect(editorElement?.querySelectorAll("p")).toHaveLength(0);
+
+    await act(async () => {
+      editorElement?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Enter",
+        }),
+      );
+    });
+
+    const latestContentJson = vi.mocked(props.onUpdateContent).mock.lastCall?.[0];
+
+    expect(props.onCreateBelow).not.toHaveBeenCalled();
+    if (!latestContentJson) {
+      throw new Error("Expected the editor to publish a body paragraph below the heading.");
+    }
+    expect(JSON.parse(latestContentJson)).toEqual({
+      content: [
+        {
+          attrs: { level: 1 },
+          content: [{ text: "Scene title", type: "text" }],
+          type: "heading",
+        },
+        { type: "paragraph" },
+      ],
+      type: "doc",
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("uses Option+ArrowUp to merge with the card above", async () => {
     const { container, props, root } = renderEditor({
       onMergeAbove: vi.fn(() => true),

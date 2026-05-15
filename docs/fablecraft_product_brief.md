@@ -160,6 +160,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - In editing mode, Tab+Arrow keys move between nearby cards, place the caret at the end of the destination card, and stay in edit mode
 - In editing mode, Tab+Arrow keys create a card in the pointed direction when no nearby destination card exists
 - Enter in an empty new-card heading converts the single heading line to regular body text instead of creating another card
+- Enter in a written heading keeps the heading intact and starts a regular body-text line below it
 - Double Enter → new card below
 - Tab+Enter → split at line
 - markdown shortcuts render into rich text, including visible headings and lists
