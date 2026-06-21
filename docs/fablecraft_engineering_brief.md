@@ -141,7 +141,7 @@ All UI values must be centralized:
 ```ts
 spacing: 24px
 cardHeight: 84px
-cardWidth: 468px default, 500px wide setting
+cardWidth: 468px default, 640px wide setting
 contentSize: tokenized
 contentLineHeight: tokenized
 animation: ~140ms ease-in-out
@@ -259,6 +259,7 @@ animation: ~140ms ease-in-out
 
 ### Layout
 - active card centered
+- active-card/document recentering temporarily suppresses wheel panning so trackpad momentum cannot immediately push an arrow-selected card off center
 - workspace stage fills the available window instead of clipping to an internal max width
 - workspace background matches the card surface rather than using a separate tint
 - on macOS, the native title bar overlays the app content and matches the active light/dark background instead of showing a separate strip
@@ -268,14 +269,14 @@ animation: ~140ms ease-in-out
 - preview cards retain measured height instead of collapsing back to the minimum, and they remeasure when content changes
 - measured card height uses the full rendered card surface so edit mode does not change wrapping or sibling spacing
 - the active card keeps the same renderer footprint between navigation and editing
+- oversized active cards use viewport-aware vertical positioning: navigation pins the card top inside the viewport, while editing pins the card bottom inside the viewport with buffer
 - increased internal card padding still preserves the same active vs inactive footprint
 - focused and unfocused cards keep the same footprint
-- cards use shadow rather than visible borders
+- unselected cards render without visible outlines or shadows
 - navigation focus uses the same elevated shadow as the selected editing card
 - dark theme card shadows are disabled; card visibility comes from lighter card-surface tokens, with an even lighter editing surface
 - card number labels use a theme token with a lighter dark-mode value
-- neighborhood cards keep full text contrast and a soft shadow
-- non-neighborhood cards keep the same text and surface color, but render without shadow emphasis
+- neighborhood and non-neighborhood cards keep full text contrast without shadow treatment
 - immediate parent aligns with the active card
 - the first immediate child aligns to the active card centerline, and later children stack below it even when that child column also contains other subtree groups
 - the active child-group anchor must preserve the top-to-bottom order of neighboring sibling subtrees in that column
@@ -345,6 +346,7 @@ animation: ~140ms ease-in-out
 - integration setup commands show a tick when the local config already contains the Fablecraft MCP entry
 - Cmd/Ctrl+F opens centered search over the document
 - settings labels clearly distinguish theme, text size, line height, and card width
+- settings include a neighbor-card visibility preference; hidden mode suppresses non-active normal workspace card shells while preserving keyboard navigation and overview rendering
 - settings overlays stay within the viewport and scroll internally when content is tall
 - settings update token-backed UI immediately and persist locally
 
@@ -420,6 +422,7 @@ animation: ~140ms ease-in-out
 Card numbering:
 - Card numbering is derived at runtime from document structure, not stored in SQLite.
 - The current implementation assigns labels by depth and visual order using a depth letter plus two-digit sequence, for example `A01`, `B01`, `B02`.
+- Card shells render the current card label in the top-right corner and, for non-root cards, the parent card label in the top-left corner using the same label token.
 - Search results must display the derived card label alongside matched content.
 Settings presentation:
 - Settings rows should expose row-level keyboard focus visually with a leading chevron-style cue.

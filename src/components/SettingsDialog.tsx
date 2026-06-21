@@ -15,7 +15,7 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
-const SETTING_ROW_COUNT = 6;
+const SETTING_ROW_COUNT = 7;
 
 function settingOptionIndex(options: string[], value: string) {
   return Math.max(0, options.findIndex((option) => option === value));
@@ -189,6 +189,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const setCardWidth = useSettingsStore((state) => state.setCardWidth);
   const setFont = useSettingsStore((state) => state.setFont);
   const setLineHeight = useSettingsStore((state) => state.setLineHeight);
+  const setNeighborCards = useSettingsStore((state) => state.setNeighborCards);
   const setScrollPan = useSettingsStore((state) => state.setScrollPan);
   const setTextSize = useSettingsStore((state) => state.setTextSize);
   const setTheme = useSettingsStore((state) => state.setTheme);
@@ -274,6 +275,10 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           chooseNextValue(["standard", "wide"], preferences.cardWidth),
         );
       } else if (activeIndex === 5) {
+        setNeighborCards(
+          chooseNextValue(["visible", "hidden"], preferences.neighborCards),
+        );
+      } else if (activeIndex === 6) {
         setScrollPan(
           chooseNextValue(["enabled", "disabled"], preferences.scrollPan),
         );
@@ -322,6 +327,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     setCardWidth,
     setFont,
     setLineHeight,
+    setNeighborCards,
     setScrollPan,
     setTextSize,
     setTheme,
@@ -329,7 +335,6 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
   return (
     <OverlayShell
-      footer="These controls update the global UI tokens immediately for the current machine."
       onPanelKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -446,21 +451,41 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         />
         <SettingGroup
           active={activeRowIndex === 5}
-          id="scroll-pan"
-          label="Trackpad Pan"
-          onChange={setScrollPan}
+          id="neighbor-cards"
+          label="Neighbor Cards"
+          onChange={setNeighborCards}
           onFocused={() => {
             activeRowIndexRef.current = 5;
             setActiveRowIndex(5);
           }}
-          onFocusNext={() => focusRow(0)}
+          onFocusNext={() => focusRow(6)}
           onFocusPrevious={() => focusRow(4)}
+          options={[
+            { label: "Visible", value: "visible" },
+            { label: "Hidden", value: "hidden" },
+          ]}
+          rowRef={(element) => {
+            rowRefs.current[5] = element;
+          }}
+          value={preferences.neighborCards}
+        />
+        <SettingGroup
+          active={activeRowIndex === 6}
+          id="scroll-pan"
+          label="Trackpad Pan"
+          onChange={setScrollPan}
+          onFocused={() => {
+            activeRowIndexRef.current = 6;
+            setActiveRowIndex(6);
+          }}
+          onFocusNext={() => focusRow(0)}
+          onFocusPrevious={() => focusRow(5)}
           options={[
             { label: "Enabled", value: "enabled" },
             { label: "Disabled", value: "disabled" },
           ]}
           rowRef={(element) => {
-            rowRefs.current[5] = element;
+            rowRefs.current[6] = element;
           }}
           value={preferences.scrollPan}
         />

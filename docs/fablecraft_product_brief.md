@@ -182,6 +182,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - on macOS, the native traffic-light title bar overlays the app content so it uses the exact same light/dark background as the workspace
 - the top drag region spans the upper 128px of the window so the overlay title area is easy to grab
 - Active card: centered
+- arrow-key navigation recenters the selected card and should not be immediately displaced by residual trackpad pan momentum
 - Parents: left-middle column
 - Children: right column
 - Siblings: above and below the active card
@@ -203,8 +204,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - returning from overview restores the normal rich-card spacing without temporarily packing long neighboring cards as minimum-height cards
 - overview titles are derived from the first non-empty line of each card's existing content; cards still do not have separate persisted titles
 - clicking a card in overview selects it as the return target without entering text editing
-- cards in the active neighborhood use a slightly lighter border when not selected
-- cards outside the active neighborhood keep the same text and surface color, but lose shadow emphasis
+- unselected cards keep the same text and surface color, but render without visible outline or shadow
 - dark theme cards use lighter box surfaces instead of shadows; the selected editing card becomes lighter again
 - dark theme card number labels use a light token so labels such as `A01` remain visible
 - immediate parent aligns vertically with the active card
@@ -237,7 +237,10 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - the focused card uses the elevated active shadow in navigation mode and editing mode so focus is clear before typing begins
 - focused cards do not resize just because they are selected
 - focused and unfocused cards keep the same footprint
-- selected cards keep the same thin border as unselected cards
+- only the currently selected card shows elevated shadow treatment
+- unselected cards have no visible outline or shadow
+- when a selected card is taller than the window, navigation mode keeps the card top and title visible while the body overflows below the viewport
+- pressing Enter to edit an oversized card shifts it so the card bottom is visible with a small viewport buffer and the top overflows above
 - cards only grow when content adds lines
 - no scrolling
 - no nested scroll
@@ -421,6 +424,7 @@ Includes:
 - default reading scale should stay slightly compact to preserve card density
 - line height
 - card width
+- neighbor cards visibility
 - row-based inline controls instead of native selectors
 - keyboard navigation is preserved: Up/Down move between setting rows, Left/Right change the current row
 - the active row remains selected after immediate preference changes such as switching between light and dark themes
@@ -578,6 +582,7 @@ Fablecraft is a:
 Its core innovation is allowing users to move across **levels of abstraction** while maintaining a clean, minimal interface.
 Card identity:
 - Each card shows a human-friendly structural number in the top-right corner.
+- Non-root cards show their parent card's structural number in the top-left corner using the same label style.
 - The current first-pass numbering model is grid-like by depth: root cards begin at `A01`, their children at `B01`, `B02`, and so on.
 - The numbering is present in workspace cards and search results to make navigation and discussion easier without introducing titles.
 Settings clarity:

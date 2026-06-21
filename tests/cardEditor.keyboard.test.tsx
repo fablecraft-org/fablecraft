@@ -269,6 +269,134 @@ describe("CardEditor keyboard behavior", () => {
     });
   });
 
+  it("turns an empty heading into regular text on Enter after Tab-key creation", async () => {
+    const setup = renderEditor();
+
+    await act(async () => {
+      setup.root.render(<CardEditor {...setup.props} />);
+    });
+
+    const setupEditorElement = setup.container.querySelector(".ProseMirror") as HTMLElement | null;
+
+    await act(async () => {
+      setupEditorElement?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Tab",
+        }),
+      );
+      setup.root.unmount();
+    });
+
+    const { container, props, root } = renderEditor({
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
+      focusPlacement: "end",
+    });
+
+    await act(async () => {
+      root.render(<CardEditor {...props} />);
+    });
+
+    const editorElement = container.querySelector(".ProseMirror") as HTMLElement | null;
+
+    await act(async () => {
+      editorElement?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Enter",
+        }),
+      );
+    });
+
+    const latestContentJson = vi.mocked(props.onUpdateContent).mock.lastCall?.[0];
+
+    expect(props.onSplitAtSelection).not.toHaveBeenCalled();
+    expect(props.onCreateBelow).not.toHaveBeenCalled();
+    if (!latestContentJson) {
+      throw new Error("Expected the stale Tab state to preserve normal heading Enter behavior.");
+    }
+    expect(JSON.parse(latestContentJson)).toEqual({
+      content: [{ type: "paragraph" }],
+      type: "doc",
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("keeps a written heading as a heading on Enter after Tab-key creation", async () => {
+    const setup = renderEditor();
+
+    await act(async () => {
+      setup.root.render(<CardEditor {...setup.props} />);
+    });
+
+    const setupEditorElement = setup.container.querySelector(".ProseMirror") as HTMLElement | null;
+
+    await act(async () => {
+      setupEditorElement?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Tab",
+        }),
+      );
+      setup.root.unmount();
+    });
+
+    const { container, props, root } = renderEditor({
+      contentJson: JSON.stringify({
+        content: [
+          {
+            attrs: { level: 1 },
+            content: [{ text: "Scene title", type: "text" }],
+            type: "heading",
+          },
+        ],
+        type: "doc",
+      }),
+      focusPlacement: "end",
+    });
+
+    await act(async () => {
+      root.render(<CardEditor {...props} />);
+    });
+
+    const editorElement = container.querySelector(".ProseMirror") as HTMLElement | null;
+
+    await act(async () => {
+      editorElement?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Enter",
+        }),
+      );
+    });
+
+    const latestContentJson = vi.mocked(props.onUpdateContent).mock.lastCall?.[0];
+
+    expect(props.onSplitAtSelection).not.toHaveBeenCalled();
+    expect(props.onCreateBelow).not.toHaveBeenCalled();
+    if (!latestContentJson) {
+      throw new Error("Expected the stale Tab state to insert a body paragraph.");
+    }
+    expect(JSON.parse(latestContentJson)).toEqual({
+      content: [
+        {
+          attrs: { level: 1 },
+          content: [{ text: "Scene title", type: "text" }],
+          type: "heading",
+        },
+        { type: "paragraph" },
+      ],
+      type: "doc",
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("uses Option+ArrowUp to merge with the card above", async () => {
     const { container, props, root } = renderEditor({
       onMergeAbove: vi.fn(() => true),

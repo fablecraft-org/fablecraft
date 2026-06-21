@@ -46,6 +46,8 @@ const OVERVIEW_SCALE = 0.82;
 const OVERVIEW_SIBLING_GAP = 18;
 const OVERVIEW_PREFERRED_SIBLING_CENTER_GAP = 148;
 const OVERVIEW_MAX_SIBLING_CENTER_GAP = 200;
+const ACTIVE_CARD_VIEWPORT_BUFFER = 48;
+const RECENTER_WHEEL_SUPPRESSION_MS = 700;
 
 function estimateRichCardHeight(
   contentJson: string,
@@ -97,6 +99,10 @@ function measuredLayoutHeight(element: HTMLElement) {
   return Math.max(element.offsetHeight, element.scrollHeight);
 }
 
+function viewportHeight() {
+  return typeof window === "undefined" ? 800 : window.innerHeight;
+}
+
 function descendantCardIds(cards: DocumentSnapshot["cards"], cardId: string) {
   const descendants: string[] = [];
   const queue = [cardId];
@@ -137,6 +143,11 @@ export function DocumentWorkspace({
 }: DocumentWorkspaceProps) {
   const activeCardShellRef = useRef<HTMLDivElement | null>(null);
   const tabKeyHeldRef = useRef(false);
+  const previousCenterTargetRef = useRef<{
+    activeCardId: string | null;
+    documentId: string;
+  } | null>(null);
+  const wheelPanSuppressedUntilRef = useRef(0);
   const wrappedParentSourceChildRef = useRef<Record<string, string>>({});
   const [pendingEditorFocusPlacement, setPendingEditorFocusPlacement] =
     useState<EditorFocusPlacement | null>(null);
@@ -144,6 +155,8 @@ export function DocumentWorkspace({
   const [isOverviewMode, setIsOverviewMode] = useState(false);
   const [stageOffset, setStageOffset] = useState({ x: 0, y: 0 });
   const [cardHeights, setCardHeights] = useState<Record<string, number>>({});
+  const [workspaceViewportHeight, setWorkspaceViewportHeight] =
+    useState(viewportHeight);
   const activeCardId = useInteractionStore((state) => state.activeCardId);
   const setActiveCardId = useInteractionStore((state) => state.setActiveCardId);
   const mode = useAppStore((state) => state.mode);
@@ -298,6 +311,9 @@ export function DocumentWorkspace({
       ? stageCards.map((position) => ({
           ...position,
           contentJson: cardContent(activeSnapshot, position.cardId),
+          parentId:
+            activeSnapshot.cards.find((card) => card.id === position.cardId)
+              ?.parentId ?? null,
         }))
       : [];
   const emptyChildGap = isOverviewMode ? null : normalStageLayoutResult.emptyChildGap;
@@ -531,17 +547,42 @@ export function DocumentWorkspace({
     setActiveCardId(nextActiveCardId);
   }, [activeCardId, activeSnapshot, setActiveCardId]);
 
-  useEffect(() => {
-    if (isOverviewMode) {
-      return;
+  useLayoutEffect(() => {
+    const previousCenterTarget = previousCenterTargetRef.current;
+    const centerTargetChanged =
+      previousCenterTarget !== null &&
+      (previousCenterTarget.activeCardId !== activeCardId ||
+        previousCenterTarget.documentId !== document.documentId);
+
+    previousCenterTargetRef.current = {
+      activeCardId,
+      documentId: document.documentId,
+    };
+
+    if (centerTargetChanged) {
+      wheelPanSuppressedUntilRef.current =
+        Date.now() + RECENTER_WHEEL_SUPPRESSION_MS;
     }
 
     setStageOffset({ x: 0, y: 0 });
-  }, [activeCardId, document.documentId, isOverviewMode]);
+  }, [activeCardId, document.documentId]);
 
   useEffect(() => {
     setIsOverviewMode(false);
   }, [document.documentId]);
+
+  useEffect(() => {
+    function updateViewportHeight() {
+      setWorkspaceViewportHeight(viewportHeight());
+    }
+
+    updateViewportHeight();
+    window.addEventListener("resize", updateViewportHeight);
+
+    return () => {
+      window.removeEventListener("resize", updateViewportHeight);
+    };
+  }, []);
 
   useEffect(() => {
     setCardHeights({});
@@ -745,6 +786,10 @@ export function DocumentWorkspace({
     }
 
     event.preventDefault();
+    if (Date.now() < wheelPanSuppressedUntilRef.current) {
+      return;
+    }
+
     setStageOffset((currentOffset) => ({
       x: clampStageOffset(currentOffset.x - event.deltaX, stagePanLimit.x),
       y: clampStageOffset(currentOffset.y - event.deltaY, stagePanLimit.y),
@@ -1064,8 +1109,29 @@ export function DocumentWorkspace({
           </svg>
         ) : null}
         {positionedCards.map((card) => {
+          if (
+            uiPreferences.neighborCards === "hidden" &&
+            !isOverviewMode &&
+            !card.isActive
+          ) {
+            return null;
+          }
+
           const displayX = card.x + stageOffset.x;
           const displayY = card.y + stageOffset.y;
+          const activeCardOverflowsViewport =
+            !isOverviewMode &&
+            card.isActive &&
+            card.height >
+              workspaceViewportHeight - ACTIVE_CARD_VIEWPORT_BUFFER * 2;
+          const activeCardTop = activeCardOverflowsViewport
+            ? isEditingSelectedCard
+              ? workspaceViewportHeight -
+                ACTIVE_CARD_VIEWPORT_BUFFER -
+                card.height +
+                displayY
+              : ACTIVE_CARD_VIEWPORT_BUFFER + displayY
+            : null;
 
           return (
                 !isOverviewMode &&
@@ -1092,11 +1158,22 @@ export function DocumentWorkspace({
                       paddingLeft: `${activeHorizontalPadding}px`,
                       paddingRight: `${activeHorizontalPadding}px`,
                       paddingTop: `${activeTopPadding}px`,
-                      top: `calc(50% + ${displayY}px)`,
-                      transform: "translate(-50%, -50%)",
+                      top:
+                        activeCardTop === null
+                          ? `calc(50% + ${displayY}px)`
+                          : `${activeCardTop}px`,
+                      transform: activeCardOverflowsViewport
+                        ? "translateX(-50%)"
+                        : "translate(-50%, -50%)",
                       zIndex: 2,
                     }}
                   >
+                    {selectedCard.parentId ? (
+                      <p className="pointer-events-none absolute left-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]">
+                        {cardNumbers[selectedCard.parentId] ??
+                          selectedCard.parentId.toUpperCase()}
+                      </p>
+                    ) : null}
                     <p className="pointer-events-none absolute right-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]">
                       {cardNumbers[selectedCard.id] ?? selectedCard.id.toUpperCase()}
                     </p>
@@ -1312,6 +1389,11 @@ export function DocumentWorkspace({
                     cardWidth={isOverviewMode ? OVERVIEW_CARD_WIDTH : undefined}
                     cardLabel={cardNumbers[card.cardId] ?? card.cardId.toUpperCase()}
                     contentJson={card.contentJson}
+                    parentCardLabel={
+                      card.parentId
+                        ? cardNumbers[card.parentId] ?? card.parentId.toUpperCase()
+                        : undefined
+                    }
                     placeholder={
                       !isFirstRootCardId(card.cardId) &&
                       isContentEffectivelyEmpty(card.contentJson)
@@ -1319,7 +1401,6 @@ export function DocumentWorkspace({
                         : ""
                     }
                     isActive={card.isActive}
-                    isNeighborhood={card.isNeighborhood}
                     minHeight={isOverviewMode ? OVERVIEW_CARD_HEIGHT : undefined}
                     key={card.cardId}
                     onMeasureHeight={(height) => {

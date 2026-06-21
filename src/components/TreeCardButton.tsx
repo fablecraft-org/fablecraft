@@ -6,9 +6,9 @@ interface TreeCardButtonProps {
   borderColor: string;
   cardLabel?: string;
   contentJson: string;
+  parentCardLabel?: string;
   placeholder?: string;
   isActive?: boolean;
-  isNeighborhood: boolean;
   onMeasureHeight?: (height: number) => void;
   onClick: () => void;
   cardWidth?: number;
@@ -23,9 +23,9 @@ export function TreeCardButton({
   borderColor,
   cardLabel,
   contentJson,
+  parentCardLabel,
   placeholder = "",
   isActive = false,
-  isNeighborhood,
   onMeasureHeight,
   onClick,
   cardWidth,
@@ -39,11 +39,7 @@ export function TreeCardButton({
   const horizontalPadding = titleOnly ? 20 : isActive ? 33 : 34;
   const topPadding = titleOnly ? 18 : isActive ? 40 : 42;
   const bottomPadding = titleOnly ? 18 : isActive ? 23 : 24;
-  const renderedShadow = isActive
-    ? "var(--fc-shadow-elevated)"
-    : isNeighborhood
-      ? "var(--fc-shadow-soft)"
-      : "none";
+  const renderedShadow = isActive ? "var(--fc-shadow-elevated)" : "none";
   const renderedSurface = isActive
     ? "var(--fc-color-card-surface-active)"
     : "var(--fc-color-card-surface)";
@@ -100,6 +96,17 @@ export function TreeCardButton({
         zIndex: isActive ? 2 : 1,
       } as CSSProperties}
     >
+      {parentCardLabel ? (
+        <p
+          className="pointer-events-none absolute font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]"
+          style={{
+            left: titleOnly ? "18px" : "28px",
+            top: titleOnly ? "12px" : "18px",
+          }}
+        >
+          {parentCardLabel}
+        </p>
+      ) : null}
       {cardLabel ? (
         <p
           className="pointer-events-none absolute font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]"
@@ -113,7 +120,7 @@ export function TreeCardButton({
       ) : null}
       {titleOnly ? (
         <p
-          className="m-0 max-w-full overflow-hidden pr-10 font-[var(--fc-font-ui)] text-[15px] font-semibold leading-[1.25] text-[var(--fc-color-text)]"
+          className={`m-0 max-w-full overflow-hidden pr-10 font-[var(--fc-font-ui)] text-[15px] font-semibold leading-[1.25] text-[var(--fc-color-text)] ${parentCardLabel ? "pl-10" : ""}`}
           style={{
             display: "-webkit-box",
             WebkitBoxOrient: "vertical",

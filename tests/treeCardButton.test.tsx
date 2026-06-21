@@ -106,9 +106,9 @@ describe("TreeCardButton", () => {
           borderColor="#111111"
           cardLabel="B01"
           contentJson='{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hello"}]}]}'
-          isNeighborhood
           onClick={() => {}}
           onMeasureHeight={(height) => measuredHeights.push(height)}
+          parentCardLabel="A01"
           x={0}
           y={0}
         />,
@@ -120,6 +120,7 @@ describe("TreeCardButton", () => {
     expect(measuredHeights[0]).toBe(180);
     expect(paragraph?.className).toContain("m-0");
     expect(container.textContent).toContain("B01");
+    expect(container.textContent).toContain("A01");
 
     act(() => {
       root.unmount();
@@ -141,7 +142,6 @@ describe("TreeCardButton", () => {
           borderColor="#111111"
           cardLabel="B01"
           contentJson='{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hello"}]}]}'
-          isNeighborhood
           onClick={() => {}}
           onMeasureHeight={(height) => measuredHeights.push(height)}
           scale={0.82}
@@ -195,7 +195,6 @@ describe("TreeCardButton", () => {
             ],
             type: "doc",
           })}
-          isNeighborhood
           onClick={() => {}}
           x={0}
           y={0}
@@ -226,7 +225,6 @@ describe("TreeCardButton", () => {
           borderColor="#111111"
           cardLabel="B01"
           contentJson='{"type":"doc","content":[{"type":"paragraph"}]}'
-          isNeighborhood
           onClick={() => {}}
           placeholder="empty card"
           x={0}
@@ -260,9 +258,9 @@ describe("TreeCardButton", () => {
           cardLabel="B01"
           cardWidth={236}
           contentJson='{"type":"doc","content":[{"type":"heading","content":[{"type":"text","text":"Scene title"}]},{"type":"paragraph","content":[{"type":"text","text":"Hidden body"}]}]}'
-          isNeighborhood
           minHeight={72}
           onClick={() => {}}
+          parentCardLabel="A01"
           titleOnly
           x={0}
           y={0}
@@ -277,6 +275,7 @@ describe("TreeCardButton", () => {
       (paragraph) => paragraph.textContent === "Scene title",
     ) as HTMLParagraphElement | undefined;
     expect(titleParagraph?.className).toContain("overflow-hidden");
+    expect(titleParagraph?.className).toContain("pl-10");
     expect(titleParagraph?.className).not.toContain("truncate");
 
     act(() => {
@@ -284,7 +283,7 @@ describe("TreeCardButton", () => {
     });
   });
 
-  it("keeps the active border thin and softens neighborhood vs distant cards differently", () => {
+  it("keeps only the active card visually elevated", () => {
     HTMLElement.prototype.getBoundingClientRect = () => mockRect(180);
     mockLayoutHeight(180);
 
@@ -300,16 +299,14 @@ describe("TreeCardButton", () => {
           cardLabel="A01"
           contentJson='{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Active"}]}]}'
           isActive
-            isNeighborhood
-            onClick={() => {}}
-            x={0}
-            y={0}
+          onClick={() => {}}
+          x={0}
+          y={0}
           />
           <TreeCardButton
             borderColor="#111111"
             cardLabel="B01"
             contentJson='{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Nearby"}]}]}'
-            isNeighborhood
             onClick={() => {}}
             x={0}
             y={0}
@@ -318,7 +315,6 @@ describe("TreeCardButton", () => {
             borderColor="#111111"
             cardLabel="B02"
             contentJson='{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Far"}]}]}'
-            isNeighborhood={false}
             onClick={() => {}}
             x={0}
             y={0}
@@ -334,13 +330,14 @@ describe("TreeCardButton", () => {
 
     expect(activeCard?.style.borderWidth).toBe("0px");
     expect(activeCard?.style.opacity).toBe("1");
+    expect(activeCard?.style.boxShadow).toBe("var(--fc-shadow-elevated)");
     expect(activeCard?.style.paddingTop).toBe("40px");
     expect(activeCard?.querySelector("p")?.className).toContain(
       "text-[var(--fc-color-card-label)]",
     );
     expect(neighborhoodCard?.style.borderWidth).toBe("0px");
     expect(neighborhoodCard?.style.opacity).toBe("1");
-    expect(neighborhoodCard?.style.boxShadow).toBeTruthy();
+    expect(neighborhoodCard?.style.boxShadow).toBe("none");
     expect(distantCard?.style.borderWidth).toBe("0px");
     expect(distantCard?.style.opacity).toBe("1");
     expect(distantCard?.style.boxShadow).toBe("none");

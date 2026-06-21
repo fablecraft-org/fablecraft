@@ -19,6 +19,7 @@ describe("settings persistence", () => {
   it("writes every preference change back to localStorage", () => {
     useSettingsStore.getState().setTheme("dark");
     useSettingsStore.getState().setFont("serif");
+    useSettingsStore.getState().setNeighborCards("hidden");
     useSettingsStore.getState().setScrollPan("disabled");
 
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -27,6 +28,7 @@ describe("settings persistence", () => {
     const parsed = JSON.parse(stored!) as Record<string, string>;
     expect(parsed.theme).toBe("dark");
     expect(parsed.font).toBe("serif");
+    expect(parsed.neighborCards).toBe("hidden");
     expect(parsed.scrollPan).toBe("disabled");
   });
 
@@ -110,6 +112,14 @@ describe("settings persistence", () => {
     });
   });
 
+  it("applies the wide card width token", () => {
+    useSettingsStore.getState().setCardWidth("wide");
+
+    expect(
+      document.documentElement.style.getPropertyValue("--fc-card-width"),
+    ).toBe("640px");
+  });
+
   it("falls back to defaults when stored JSON is corrupted", () => {
     window.localStorage.setItem(STORAGE_KEY, "not json");
 
@@ -132,12 +142,13 @@ describe("settings persistence", () => {
   it("ignores unknown preference values rather than adopting them", () => {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ theme: "hacked", cardWidth: "huge" }),
+      JSON.stringify({ theme: "hacked", cardWidth: "huge", neighborCards: "maybe" }),
     );
 
     const restored = loadStoredUiPreferences();
 
     expect(restored.theme).toBe("light");
     expect(restored.cardWidth).toBe("standard");
+    expect(restored.neighborCards).toBe("visible");
   });
 });

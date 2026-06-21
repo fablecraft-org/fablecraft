@@ -165,7 +165,7 @@ export function CardEditor({
   placeholder = "",
 }: CardEditorProps) {
   ensureTabKeyListeners();
-  const tabHeldRef = useRef(tabKeyHeldAcrossEditors);
+  const tabHeldRef = useRef(false);
   const wasEditingRef = useRef(false);
   const editorRef = useRef<Editor | null>(null);
   const isTabHeld = () => tabHeldRef.current || tabKeyHeldAcrossEditors;
@@ -335,7 +335,7 @@ export function CardEditor({
         }
 
         if (event.key === "Enter" && event.shiftKey === false && event.altKey === false && event.metaKey === false && event.ctrlKey === false) {
-          if (isTabHeld()) {
+          if (tabHeldRef.current) {
             event.preventDefault();
             if (!canCreateStructure) {
               return true;

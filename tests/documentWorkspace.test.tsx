@@ -13,6 +13,7 @@ import { dispatchNativeMenuAction } from "../src/lib/nativeMenu";
 import { useAppStore } from "../src/state/appStore";
 import { useDocumentStore } from "../src/state/documentStore";
 import { useInteractionStore } from "../src/state/interactionStore";
+import { useSettingsStore } from "../src/state/settingsStore";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 const loadCurrentDocumentSnapshot = vi.fn();
@@ -71,6 +72,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     contentJson,
     isActive,
     onClick,
+    parentCardLabel,
     placeholder,
     scale,
     titleOnly,
@@ -81,6 +83,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     contentJson?: string;
     isActive?: boolean;
     onClick?: () => void;
+    parentCardLabel?: string;
     placeholder?: string;
     scale?: number;
     titleOnly?: boolean;
@@ -91,6 +94,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
       data-card-label={cardLabel ?? ""}
       data-content-json={contentJson ?? ""}
       data-is-active={String(Boolean(isActive))}
+      data-parent-card-label={parentCardLabel ?? ""}
       data-placeholder={placeholder ?? ""}
       data-scale={String(scale ?? "")}
       data-title-only={String(Boolean(titleOnly))}
@@ -135,6 +139,7 @@ function resetStores() {
   useInteractionStore.setState({
     activeCardId: null,
   });
+  useSettingsStore.getState().resetPreferences();
 }
 
 function mockLayoutHeight(heightForElement: (element: HTMLElement) => number) {
@@ -165,6 +170,7 @@ describe("DocumentWorkspace", () => {
     HTMLElement.prototype,
     "scrollHeight",
   );
+  const originalInnerHeight = window.innerHeight;
   const originalResizeObserver = globalThis.ResizeObserver;
 
   beforeEach(() => {
@@ -188,10 +194,18 @@ describe("DocumentWorkspace", () => {
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     if (originalOffsetHeight) {
       Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
     }
     if (originalScrollHeight) {
       Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
     }
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight,
+    });
     document.body.innerHTML = "";
     resetStores();
   });
@@ -281,6 +295,9 @@ describe("DocumentWorkspace", () => {
     expect(Array.from(container.querySelectorAll('[data-testid="tree-card"]')).map((node) =>
       (node as HTMLDivElement).dataset.cardLabel,
     )).toEqual(["B01", "B02"]);
+    expect(Array.from(container.querySelectorAll('[data-testid="tree-card"]')).map((node) =>
+      (node as HTMLDivElement).dataset.parentCardLabel,
+    )).toEqual(["A01", "A01"]);
 
     await act(async () => {
       root.unmount();
@@ -318,6 +335,80 @@ describe("DocumentWorkspace", () => {
 
     expect(activeShell?.style.paddingTop).toBe("33px");
     expect(activeShell?.style.paddingBottom).toBe("33px");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("keeps the top of oversized navigation cards visible and the bottom of oversized editing cards visible", async () => {
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 720,
+    });
+    mockLayoutHeight((element) => {
+      const activeCardId = useInteractionStore.getState().activeCardId;
+
+      return element.dataset.testid === "active-card-shell" && activeCardId === "card-a"
+        ? 1200
+        : 84;
+    });
+
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowRight",
+        }),
+      );
+    });
+
+    const navigationShell = container.querySelector(
+      '[data-testid="active-card-shell"]',
+    ) as HTMLDivElement | null;
+
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(navigationShell?.style.minHeight).toBe("1200px");
+    expect(navigationShell?.style.top).toBe("48px");
+    expect(navigationShell?.style.transform).toBe("translateX(-50%)");
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Enter",
+        }),
+      );
+    });
+
+    const editingShell = container.querySelector(
+      '[data-testid="active-card-shell"]',
+    ) as HTMLDivElement | null;
+
+    expect(useAppStore.getState().mode).toBe("editing");
+    expect(editingShell?.style.top).toBe("-528px");
+    expect(editingShell?.style.transform).toBe("translateX(-50%)");
 
     await act(async () => {
       root.unmount();
@@ -442,6 +533,7 @@ describe("DocumentWorkspace", () => {
       | undefined;
 
     expect(selectedOverviewCard?.dataset.cardLabel).toBe("B01");
+    expect(selectedOverviewCard?.dataset.parentCardLabel).toBe("A01");
     expect(selectedOverviewCard?.dataset.scale).toBe(initialOverviewScale);
     expect(selectedOverviewCard?.dataset.x).toBe("0");
     expect(selectedOverviewCard?.dataset.y).toBe("0");
@@ -789,6 +881,124 @@ describe("DocumentWorkspace", () => {
       | undefined;
 
     expect(nextActiveOverviewCard?.dataset.scale).toBe("0.82");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("recenters the active card after arrow navigation from a panned workspace", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const stage = container.querySelector('[data-testid="document-stage"]');
+
+    await act(async () => {
+      stage?.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaX: 48,
+          deltaY: 12,
+        }),
+      );
+    });
+
+    const pannedShell = container.querySelector(
+      '[data-testid="active-card-shell"]',
+    ) as HTMLDivElement | null;
+    expect(pannedShell?.style.left).toBe("calc(50% + -48px)");
+    expect(pannedShell?.style.top).toBe("calc(50% + -12px)");
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowRight",
+        }),
+      );
+    });
+
+    await act(async () => {
+      stage?.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaX: 24,
+          deltaY: 24,
+        }),
+      );
+    });
+
+    const recenteredShell = container.querySelector(
+      '[data-testid="active-card-shell"]',
+    ) as HTMLDivElement | null;
+
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(recenteredShell?.style.left).toBe("calc(50% + 0px)");
+    expect(recenteredShell?.style.top).toBe("calc(50% + 0px)");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("hides neighbor cards without blocking arrow navigation", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    useSettingsStore.getState().setNeighborCards("hidden");
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    expect(container.querySelector('[data-testid="active-card-shell"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(0);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowRight",
+        }),
+      );
+    });
+
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(container.querySelector('[data-testid="active-card-shell"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(0);
 
     await act(async () => {
       root.unmount();

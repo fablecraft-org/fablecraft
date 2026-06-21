@@ -3,12 +3,14 @@ export type UiFont = "serif" | "sans";
 export type UiTextSize = "comfortable" | "large";
 export type UiLineHeight = "compact" | "relaxed";
 export type UiCardWidth = "standard" | "wide";
+export type UiNeighborCards = "visible" | "hidden";
 export type UiScrollPan = "enabled" | "disabled";
 
 export interface UiPreferences {
   cardWidth: UiCardWidth;
   font: UiFont;
   lineHeight: UiLineHeight;
+  neighborCards: UiNeighborCards;
   scrollPan: UiScrollPan;
   textSize: UiTextSize;
   theme: UiTheme;
@@ -119,13 +121,14 @@ const lineHeightTokens = {
 
 const cardWidthTokens = {
   standard: 468,
-  wide: 500,
+  wide: 640,
 } satisfies Record<UiCardWidth, number>;
 
 const defaultUiPreferences: UiPreferences = {
   cardWidth: "standard",
   font: "sans",
   lineHeight: "compact",
+  neighborCards: "visible",
   scrollPan: "enabled",
   textSize: "comfortable",
   theme: "light",
@@ -176,6 +179,11 @@ export function normalizeUiPreferences(
       value?.lineHeight,
       ["compact", "relaxed"],
       defaultUiPreferences.lineHeight,
+    ),
+    neighborCards: normalizeEnumValue(
+      value?.neighborCards,
+      ["visible", "hidden"],
+      defaultUiPreferences.neighborCards,
     ),
     scrollPan: normalizeEnumValue(
       value?.scrollPan,

@@ -6,6 +6,7 @@ import {
   type UiCardWidth,
   type UiFont,
   type UiLineHeight,
+  type UiNeighborCards,
   type UiPreferences,
   type UiScrollPan,
   type UiTextSize,
@@ -20,6 +21,7 @@ interface SettingsState {
   setCardWidth: (cardWidth: UiCardWidth) => void;
   setFont: (font: UiFont) => void;
   setLineHeight: (lineHeight: UiLineHeight) => void;
+  setNeighborCards: (neighborCards: UiNeighborCards) => void;
   setScrollPan: (scrollPan: UiScrollPan) => void;
   setTextSize: (textSize: UiTextSize) => void;
   setTheme: (theme: UiTheme) => void;
@@ -86,6 +88,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       preferences: commitPreferences({
         ...state.preferences,
         lineHeight,
+      }),
+    })),
+  setNeighborCards: (neighborCards) =>
+    set((state) => ({
+      preferences: commitPreferences({
+        ...state.preferences,
+        neighborCards,
       }),
     })),
   setScrollPan: (scrollPan) =>
