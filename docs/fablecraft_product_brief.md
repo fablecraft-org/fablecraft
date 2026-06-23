@@ -74,7 +74,34 @@ Cards do NOT have titles.
 - Paths (e.g. `0.2.1`) are computed
 - The document may contain multiple cards at root depth; root cards are ordered siblings with `parent_id = null`.
 
-### 2.3 Single-plane Content
+### 2.3 Folder Context
+
+- The workspace includes a shallow file-system context to the left of the document tree.
+- The current document appears as a distinct `.fable` document card immediately left of the root-card column.
+- The current folder appears as a distinct folder card while navigating folder context.
+- Folder and document context cards use different surfaces from writing cards and do not become persisted document cards.
+- Folder and FABLE explorer cards render at half the width of writing cards.
+- Explorer context card labels use plain `FOLDER` and `FABLE` labels.
+- FABLE explorer card names hide the `.fable` file extension.
+- Folder and FABLE explorer cards follow the same spatial navigation model as writing cards: the selected explorer card is centered, its same-level siblings remain visible in the same vertical column, its parent sits one column to the left, and its first visible child sits one column to the right on the same vertical center line.
+- Moving left from a root card selects the current `.fable` document card; moving left again selects the containing folder.
+- While navigating normal document cards from the current document card, only the current `.fable` document card remains visible to the left of the writing tree; when the document tree is entered from a folder preview, that folder and its sibling FABLE file column remain visible until the user navigates back out of that folder context.
+- When a folder is selected, its parent folder remains visible to the left when one exists, and the right column immediately shows only child folders and `.fable` files in the selected folder.
+- When a child folder row is selected inside a folder listing, that child folder's own child folders and `.fable` files appear immediately in the next column to the right.
+- Non-`.fable` files are not shown.
+- Selecting a sibling `.fable` document and moving right opens that document.
+- Pressing Enter on a selected FABLE document card enters inline rename mode; typing edits the filename, Enter commits the rename, and Escape cancels it.
+- FABLE document renames append `.fable` automatically, reject empty names and path separators, and do not overwrite an existing `.fable` file.
+- Selecting a child folder and moving right or pressing Enter browses into that folder.
+- Folder preview children are real navigation targets: Right from a selected child folder moves to its first visible child folder or FABLE file before entering/opening that child.
+- When a FABLE file is selected and it is the open document, Right moves into the document's root card.
+- Ctrl/Cmd+Right on the folder card creates a new untitled `.fable` document in that folder and opens it.
+- Pressing Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Are you sure you want to delete "[file name]" and all of it's contents?` before deleting the `.fable` file and all of its contents from disk.
+- The delete confirmation dialog shows centered rounded-pill Cancel and Delete actions only; arrow keys move the highlighted selection between them and Enter activates the highlighted action.
+- Confirming deletion of the currently open `.fable` file closes that document and returns to the startup surface.
+- Folder cards cannot be deleted, and folder or `.fable` document cards cannot be merged, outdented, indented, or reordered with card-structure commands.
+
+### 2.4 Single-plane Content
 
 - topology and visible writing live in a single plane
 - there is no layer feature in the desktop app, MCP contract, or persisted current schema
@@ -128,6 +155,8 @@ navigation | editing | search | command
 - Right → first child
 - Up → previous card in the current column
 - Down → next card in the current column
+- From a root card, Left moves to the current `.fable` document context card, then to its containing folder.
+- In folder context, Up/Down moves through visible folders and `.fable` files; Right enters folders or opens `.fable` files; Enter renames selected `.fable` files.
 
 Up/down follows the packed spatial column, even across different parent groups. Left/right changes depth.
 
@@ -143,7 +172,20 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - In navigation mode, Tab+Up / Down → siblings
 - In navigation mode, Tab+Right → child
 - In navigation mode, Tab+Left → wrap the current level in a new parent
+- In navigation mode on a folder context card, Ctrl/Cmd+Right creates a new untitled `.fable` file in that folder.
 - New cards start as a single empty level-one heading line with no trailing body line
+
+### Clipboard
+
+- In navigation mode on a writing card, Cmd/Ctrl+C copies only the active card's content.
+- In navigation mode on a writing card, Cmd/Ctrl+X cuts the active card plus its full descendant subtree and removes that subtree immediately.
+- Cutting the final remaining root card keeps the document valid by clearing that root card and removing its children.
+- In navigation mode, Cmd/Ctrl+V pastes a Fablecraft card payload only into an empty leaf writing card.
+- Pasting copied content fills the empty target card without creating children.
+- Pasting a cut subtree maps the pasted root onto the empty target card and recreates the cut children below it with new card ids.
+- Card clipboard payloads work across `.fable` documents through the system clipboard while each document keeps its own undo history.
+- Folder and `.fable` explorer context cards ignore card clipboard commands.
+- Editing mode keeps normal text cut, copy, and paste behavior inside the active editor.
 
 ### Editing
 

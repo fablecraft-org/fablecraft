@@ -1,4 +1,5 @@
-pub const MIGRATIONS: &[&str] = &[r#"
+pub const MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
     created_at_ms INTEGER NOT NULL,
@@ -49,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_cards_document_parent_order
 CREATE INDEX IF NOT EXISTS idx_layers_document_index
     ON layers (document_id, layer_index);
 "#,
-r#"
+    r#"
 CREATE TABLE card_content_next (
     card_id TEXT PRIMARY KEY,
     content_json TEXT NOT NULL,
@@ -77,4 +78,5 @@ WHERE row_number = 1;
 DROP TABLE card_content;
 DROP TABLE layers;
 ALTER TABLE card_content_next RENAME TO card_content;
-"#];
+"#,
+];

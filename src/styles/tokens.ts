@@ -22,6 +22,8 @@ const themeTokens = {
     border: "#a2978b",
     borderStrong: "#171412",
     cardLabel: "rgba(23, 20, 18, 0.34)",
+    explorerDocumentSurface: "#fffaf6",
+    explorerFolderSurface: "#efe4da",
     cardSurface: "#fdf6ef",
     cardSurfaceActive: "#fdf6ef",
     cardSurfaceEditing: "#fdf6ef",
@@ -46,6 +48,8 @@ const themeTokens = {
     border: "#6f7379",
     borderStrong: "#f4f4f1",
     cardLabel: "rgba(244, 244, 241, 0.68)",
+    explorerDocumentSurface: "#2d3035",
+    explorerFolderSurface: "#202226",
     cardSurface: "#24262a",
     cardSurfaceActive: "#2d3035",
     cardSurfaceEditing: "#373b41",
@@ -70,6 +74,8 @@ const themeTokens = {
   border: string;
   borderStrong: string;
   cardLabel: string;
+  explorerDocumentSurface: string;
+  explorerFolderSurface: string;
   cardSurface: string;
   cardSurfaceActive: string;
   cardSurfaceEditing: string;
@@ -221,6 +227,8 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-color-border": theme.border,
     "--fc-color-border-strong": theme.borderStrong,
     "--fc-color-card-label": theme.cardLabel,
+    "--fc-color-explorer-document-surface": theme.explorerDocumentSurface,
+    "--fc-color-explorer-folder-surface": theme.explorerFolderSurface,
     "--fc-color-card-surface": theme.cardSurface,
     "--fc-color-card-surface-active": theme.cardSurfaceActive,
     "--fc-color-card-surface-editing": theme.cardSurfaceEditing,

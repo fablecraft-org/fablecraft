@@ -3,6 +3,11 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentWorkspace } from "../src/components/DocumentWorkspace";
 import {
+  CARD_CLIPBOARD_MIME_TYPE,
+  decodeCardClipboardPayload,
+  encodeCardClipboardPayload,
+} from "../src/domain/document/clipboard";
+import {
   contentJsonForPlainText,
   contentText,
   isContentEffectivelyEmpty,
@@ -17,9 +22,22 @@ import { useSettingsStore } from "../src/state/settingsStore";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 const loadCurrentDocumentSnapshot = vi.fn();
+const listCurrentDocumentDirectory = vi.fn();
+const listFableDirectory = vi.fn();
+const createUntitledDocumentInDirectory = vi.fn();
+const deleteFableDocument = vi.fn();
+const renameFableDocument = vi.fn();
 
 vi.mock("../src/storage/documentSnapshots", () => ({
   loadCurrentDocumentSnapshot: () => loadCurrentDocumentSnapshot(),
+}));
+
+vi.mock("../src/storage/fableDirectory", () => ({
+  createUntitledDocumentInDirectory: (...args: unknown[]) => createUntitledDocumentInDirectory(...args),
+  deleteFableDocument: (...args: unknown[]) => deleteFableDocument(...args),
+  listCurrentDocumentDirectory: () => listCurrentDocumentDirectory(),
+  listFableDirectory: (...args: unknown[]) => listFableDirectory(...args),
+  renameFableDocument: (...args: unknown[]) => renameFableDocument(...args),
 }));
 
 vi.mock("../src/storage/useDocumentAutosave", () => ({
@@ -118,6 +136,33 @@ class ResizeObserverMock {
   unobserve() {}
 }
 
+function createClipboardEvent(
+  type: "copy" | "cut" | "paste",
+  seed: Record<string, string> = {},
+) {
+  const data = new Map(Object.entries(seed));
+  const event = new Event(type, {
+    bubbles: true,
+    cancelable: true,
+  }) as ClipboardEvent;
+  const clipboardData = {
+    getData: (format: string) => data.get(format) ?? "",
+    setData: (format: string, value: string) => {
+      data.set(format, value);
+    },
+  };
+
+  Object.defineProperty(event, "clipboardData", {
+    configurable: true,
+    value: clipboardData,
+  });
+
+  return {
+    data,
+    event,
+  };
+}
+
 function resetStores() {
   useAppStore.setState({
     activeDocument: null,
@@ -181,6 +226,32 @@ describe("DocumentWorkspace", () => {
     ).IS_REACT_ACT_ENVIRONMENT = true;
     globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
     loadCurrentDocumentSnapshot.mockReset();
+    listCurrentDocumentDirectory.mockReset();
+    listFableDirectory.mockReset();
+    createUntitledDocumentInDirectory.mockReset();
+    deleteFableDocument.mockReset();
+    renameFableDocument.mockReset();
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: "/tmp/Fables/story.fable",
+      entries: [
+        { kind: "folder", name: "Archive", path: "/tmp/Fables/Archive" },
+        { kind: "document", name: "side-story.fable", path: "/tmp/Fables/side-story.fable" },
+        { kind: "document", name: "story.fable", path: "/tmp/Fables/story.fable" },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+    listFableDirectory.mockResolvedValue({
+      currentDocumentPath: "/tmp/Fables/story.fable",
+      entries: [
+        { kind: "document", name: "story.fable", path: "/tmp/Fables/story.fable" },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+    deleteFableDocument.mockResolvedValue(undefined);
     resetStores();
   });
 
@@ -231,6 +302,8 @@ describe("DocumentWorkspace", () => {
     await act(async () => {
       root.render(<DocumentWorkspace document={snapshot.summary} />);
     });
+
+    await act(async () => {});
 
     const navigationShell = container.querySelector(
       '[data-testid="active-card-shell"]',
@@ -298,6 +371,795 @@ describe("DocumentWorkspace", () => {
     expect(Array.from(container.querySelectorAll('[data-testid="tree-card"]')).map((node) =>
       (node as HTMLDivElement).dataset.parentCardLabel,
     )).toEqual(["A01", "A01"]);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("moves from the root card to the containing folder and shows only folders plus fable files", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "folder", name: "Archive", path: "/tmp/Fables/Archive" },
+        { kind: "document", name: "side-story.fable", path: "/tmp/Fables/side-story.fable" },
+        { kind: "document", name: "story.fable", path: snapshot.summary.path },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+    listFableDirectory.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === "/tmp/Fables/Archive"
+          ? {
+              currentDocumentPath: snapshot.summary.path,
+              entries: [
+                {
+                  kind: "folder",
+                  name: "Deep Notes",
+                  path: "/tmp/Fables/Archive/Deep Notes",
+                },
+                {
+                  kind: "document",
+                  name: "archive-index.fable",
+                  path: "/tmp/Fables/Archive/archive-index.fable",
+                },
+              ],
+              folderName: "Archive",
+              folderPath: "/tmp/Fables/Archive",
+              parentFolderPath: "/tmp/Fables",
+            }
+          : {
+              currentDocumentPath: snapshot.summary.path,
+              entries: [
+                {
+                  kind: "document",
+                  name: "story.fable",
+                  path: snapshot.summary.path,
+                },
+              ],
+              folderName: "Fables",
+              folderPath: "/tmp/Fables",
+              parentFolderPath: "/tmp",
+            },
+      ),
+    );
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    expect(container.textContent).toContain("story");
+    expect(container.textContent).not.toContain("Fables");
+    expect(container.textContent).not.toContain("FOLDER");
+    expect(container.textContent).toContain("FABLE");
+    expect(container.textContent).not.toContain("side-story.fable");
+
+    const initialDirectoryCards = Array.from(
+      container.querySelectorAll('[data-testid="directory-card"]'),
+    ) as HTMLButtonElement[];
+    const documentCard = initialDirectoryCards.find((card) =>
+      card.textContent?.includes("story"),
+    );
+
+    expect(documentCard?.style.width).toBe("234px");
+    expect(documentCard?.textContent).not.toContain(".fable");
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowLeft",
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="active-card-shell"]')).toBeNull();
+    expect(container.textContent).toContain("Fables");
+    expect(container.textContent).toContain("story");
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowLeft",
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain("Archive");
+    expect(container.textContent).toContain("tmp");
+    expect(container.textContent).toContain("side-story");
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowRight",
+        }),
+      );
+    });
+
+    await act(async () => {});
+
+    expect(container.textContent).toContain("Deep Notes");
+    expect(container.textContent).toContain("archive-index");
+    expect(container.textContent).not.toContain(".fable");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("recenters folder and fable cards after panning when navigating or clicking", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const stage = container.querySelector(
+      '[data-testid="document-stage"]',
+    ) as HTMLDivElement | null;
+    const directoryCard = (text: string) =>
+      Array.from(
+        container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'),
+      ).find((card) => card.textContent === text);
+
+    await act(async () => {
+      stage?.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaX: 90,
+          deltaY: 30,
+        }),
+      );
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    expect(directoryCard("FABLEstory")?.dataset.isActive).toBe("true");
+    expect(directoryCard("FABLEstory")?.style.left).toBe("calc(50% + 0px)");
+    expect(directoryCard("FABLEstory")?.style.top).toBe("calc(50% + 0px)");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    expect(directoryCard("FOLDERFables")?.dataset.isActive).toBe("true");
+    expect(directoryCard("FOLDERFables")?.style.left).toBe("calc(50% + 0px)");
+    expect(directoryCard("FOLDERFables")?.style.top).toBe("calc(50% + 0px)");
+
+    await act(async () => {
+      stage?.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaX: -60,
+          deltaY: -24,
+        }),
+      );
+    });
+
+    await act(async () => {
+      directoryCard("FOLDERArchive")?.click();
+    });
+
+    expect(directoryCard("FOLDERArchive")?.dataset.isActive).toBe("true");
+    expect(directoryCard("FOLDERArchive")?.style.left).toBe("calc(50% + 0px)");
+    expect(directoryCard("FOLDERArchive")?.style.top).toBe("calc(50% + 0px)");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("renames the selected fable document with Enter and inline text", async () => {
+    const snapshot = {
+      ...makeDocumentSnapshot(),
+      summary: {
+        documentId: "doc-1",
+        name: "story",
+        openedAtMs: 1,
+        path: "/tmp/Fables/story.fable",
+      },
+    };
+    const renamedDocument = {
+      documentId: "doc-1",
+      name: "field notes",
+      openedAtMs: 1,
+      path: "/tmp/Fables/field notes.fable",
+    };
+    const onDocumentRenamed = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    renameFableDocument.mockResolvedValue(renamedDocument);
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "document", name: "story.fable", path: snapshot.summary.path },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+    listFableDirectory.mockResolvedValue({
+      currentDocumentPath: renamedDocument.path,
+      entries: [
+        { kind: "document", name: "field notes.fable", path: renamedDocument.path },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+
+    await act(async () => {
+      root.render(
+        <DocumentWorkspace
+          document={snapshot.summary}
+          onDocumentRenamed={onDocumentRenamed}
+        />,
+      );
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+    });
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+
+    expect(input?.value).toBe("story");
+
+    await act(async () => {
+      if (input) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        valueSetter?.call(input, "field notes");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+
+    await act(async () => {
+      if (input) {
+        input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+      }
+    });
+
+    expect(renameFableDocument).toHaveBeenCalledWith(
+      "/tmp/Fables/story.fable",
+      "field notes",
+    );
+    expect(onDocumentRenamed).toHaveBeenCalledWith(
+      renamedDocument,
+      "/tmp/Fables/story.fable",
+    );
+    expect(container.textContent).toContain("FABLEfield notes");
+    expect(container.querySelector("input")).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("cancels fable document rename with Escape", async () => {
+    const snapshot = {
+      ...makeDocumentSnapshot(),
+      summary: {
+        documentId: "doc-1",
+        name: "story",
+        openedAtMs: 1,
+        path: "/tmp/Fables/story.fable",
+      },
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "document", name: "story.fable", path: snapshot.summary.path },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+    });
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+
+    await act(async () => {
+      input?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+    });
+
+    expect(renameFableDocument).not.toHaveBeenCalled();
+    expect(container.querySelector("input")).toBeNull();
+    expect(container.textContent).toContain("FABLEstory");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("creates an untitled fable document from the folder card with Ctrl+Right", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const createdDocument = {
+      documentId: "created-doc",
+      name: "Untitled",
+      openedAtMs: 2,
+      path: "/tmp/Fables/Untitled.fable",
+    };
+    const onDocumentCreated = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    createUntitledDocumentInDirectory.mockResolvedValue(createdDocument);
+
+    await act(async () => {
+      root.render(
+        <DocumentWorkspace
+          document={snapshot.summary}
+          onDocumentCreated={onDocumentCreated}
+        />,
+      );
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          ctrlKey: true,
+          key: "ArrowRight",
+        }),
+      );
+    });
+
+    expect(createUntitledDocumentInDirectory).toHaveBeenCalledWith("/tmp/Fables");
+    expect(onDocumentCreated).toHaveBeenCalledWith(createdDocument);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("confirms before deleting a selected sibling fable document", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "folder", name: "Archive", path: "/tmp/Fables/Archive" },
+        { kind: "document", name: "side-story.fable", path: "/tmp/Fables/side-story.fable" },
+        { kind: "document", name: "story.fable", path: snapshot.summary.path },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+    listFableDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "folder", name: "Archive", path: "/tmp/Fables/Archive" },
+        { kind: "document", name: "story.fable", path: snapshot.summary.path },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
+    });
+
+    expect(container.textContent).toContain("FABLEside-story");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
+    });
+
+    expect(container.textContent).toContain("Delete Document");
+    expect(container.textContent).toContain(
+      "Are you sure you want to delete \"side-story\" and all of it's contents?",
+    );
+    expect(container.textContent).not.toContain("This cannot be undone");
+    expect(container.textContent).not.toContain("Escape cancels");
+
+    const cancelButton = container.querySelector(
+      '[data-testid="cancel-delete-document"]',
+    ) as HTMLButtonElement | null;
+    const deleteButton = container.querySelector(
+      '[data-testid="confirm-delete-document"]',
+    ) as HTMLButtonElement | null;
+
+    expect(cancelButton?.className).toContain("rounded-[var(--fc-radius-pill)]");
+    expect(deleteButton?.className).toContain("rounded-[var(--fc-radius-pill)]");
+    expect(cancelButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(deleteButton?.getAttribute("aria-pressed")).toBe("false");
+
+    await act(async () => {
+      cancelButton?.click();
+    });
+
+    expect(deleteFableDocument).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Delete Document");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+
+    const selectedDeleteButton = container.querySelector(
+      '[data-testid="confirm-delete-document"]',
+    ) as HTMLButtonElement | null;
+
+    expect(selectedDeleteButton?.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+    });
+
+    await act(async () => {});
+
+    expect(deleteFableDocument).toHaveBeenCalledWith("/tmp/Fables/side-story.fable");
+    expect(container.textContent).not.toContain("FABLEside-story");
+    expect(useAppStore.getState().notice?.message).toBe("Deleted \"side-story\".");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("closes the workspace after deleting the current fable document", async () => {
+    const snapshot = {
+      ...makeDocumentSnapshot(),
+      summary: {
+        documentId: "doc-1",
+        name: "story",
+        openedAtMs: 1,
+        path: "/tmp/Fables/story.fable",
+      },
+    };
+    const onDocumentDeleted = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "document", name: "story.fable", path: snapshot.summary.path },
+      ],
+      folderName: "Fables",
+      folderPath: "/tmp/Fables",
+      parentFolderPath: "/tmp",
+    });
+
+    await act(async () => {
+      root.render(
+        <DocumentWorkspace
+          document={snapshot.summary}
+          onDocumentDeleted={onDocumentDeleted}
+        />,
+      );
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Backspace" }));
+    });
+
+    expect(container.textContent).toContain("Delete Document");
+
+    await act(async () => {
+      (
+        container.querySelector('[data-testid="confirm-delete-document"]') as HTMLButtonElement | null
+      )?.click();
+    });
+
+    expect(deleteFableDocument).toHaveBeenCalledWith(snapshot.summary.path);
+    expect(onDocumentDeleted).toHaveBeenCalledWith(snapshot.summary.path);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("moves right from a folder entry to its fable child before entering the document tree", async () => {
+    const snapshot = {
+      ...makeDocumentSnapshot(),
+      summary: {
+        documentId: "doc-1",
+        name: "Robotics",
+        openedAtMs: 1,
+        path: "/tmp/Frontier/Robotics/Robotics.fable",
+      },
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "folder", name: "Design", path: "/tmp/Frontier/Design" },
+        { kind: "folder", name: "Robotics", path: "/tmp/Frontier/Robotics" },
+      ],
+      folderName: "Frontier",
+      folderPath: "/tmp/Frontier",
+      parentFolderPath: "/tmp",
+    });
+    listFableDirectory.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === "/tmp/Frontier/Robotics"
+          ? {
+              currentDocumentPath: snapshot.summary.path,
+              entries: [
+                {
+                  kind: "document",
+                  name: "Robotics.fable",
+                  path: snapshot.summary.path,
+                },
+                {
+                  kind: "document",
+                  name: "Scratchpad.fable",
+                  path: "/tmp/Frontier/Robotics/Scratchpad.fable",
+                },
+              ],
+              folderName: "Robotics",
+              folderPath: "/tmp/Frontier/Robotics",
+              parentFolderPath: "/tmp/Frontier",
+            }
+          : {
+              currentDocumentPath: snapshot.summary.path,
+              entries: [],
+              folderName: "Frontier",
+              folderPath: "/tmp/Frontier",
+              parentFolderPath: "/tmp",
+            },
+      ),
+    );
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    const currentDocumentCard = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'),
+    ).find((card) => card.textContent === "FABLERobotics");
+    const containingFolderCard = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'),
+    ).find((card) => card.textContent === "FOLDERFrontier");
+
+    expect(currentDocumentCard?.dataset.isActive).toBe("true");
+    expect(currentDocumentCard?.style.left).toBe("calc(50% + 0px)");
+    expect(containingFolderCard?.style.left).toBe("calc(50% + -258px)");
+    expect(containingFolderCard?.style.top).toBe("calc(50% + 0px)");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
+    });
+
+    await act(async () => {});
+
+    const selectedFolderCard = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'),
+    ).find((card) => card.textContent === "FOLDERRobotics");
+    const firstPreviewChildCard = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'),
+    ).find((card) => card.textContent === "FABLERobotics");
+
+    expect(selectedFolderCard?.dataset.isActive).toBe("true");
+    expect(selectedFolderCard?.style.left).toBe("calc(50% + 0px)");
+    expect(selectedFolderCard?.style.top).toBe("calc(50% + 0px)");
+    expect(firstPreviewChildCard?.style.top).toBe("calc(50% + 0px)");
+    expect(container.textContent).toContain("FABLEScratchpad");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+
+    expect(container.textContent).not.toContain("FOLDERFrontier");
+    expect(container.textContent).toContain("FOLDERRobotics");
+    expect(container.textContent).toContain("FABLERobotics");
+    expect(container.textContent).toContain("FABLEScratchpad");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+
+    expect(container.textContent).not.toContain("FOLDERFrontier");
+    expect(container.textContent).toContain("FOLDERRobotics");
+    expect(container.textContent).toContain("FABLERobotics");
+    expect(container.textContent).toContain("FABLEScratchpad");
+    expect(container.querySelector('[data-testid="active-card-shell"]')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+
+    expect(container.textContent).not.toContain("FOLDERFrontier");
+    expect(container.textContent).toContain("FOLDERRobotics");
+    expect(container.textContent).toContain("FABLERobotics");
+    expect(container.textContent).toContain("FABLEScratchpad");
+    expect(container.querySelector('[data-testid="active-card-shell"]')).not.toBeNull();
 
     await act(async () => {
       root.unmount();
@@ -2532,6 +3394,393 @@ describe("DocumentWorkspace", () => {
     expect(cardBChildren).toHaveLength(1);
     expect(useInteractionStore.getState().activeCardId).toBe(cardBChildren?.[0]?.id);
     expect(useAppStore.getState().mode).toBe("editing");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("copies selected card content in navigation mode without mutating the document", async () => {
+    let snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    snapshot = replaceCardContent(snapshot, {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Copied scene"),
+    });
+    snapshot = {
+      ...snapshot,
+      cards: snapshot.cards.concat({
+        documentId: "doc-1",
+        id: "card-a-1",
+        orderIndex: 0,
+        parentId: "card-a",
+        type: "card",
+      }),
+      contents: snapshot.contents.concat({
+        cardId: "card-a-1",
+        contentJson: contentJsonForPlainText("Child should not be copied"),
+      }),
+    };
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const { data, event } = createClipboardEvent("copy");
+
+    await act(async () => {
+      window.dispatchEvent(event);
+    });
+
+    const payload = decodeCardClipboardPayload(
+      data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "",
+    );
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(payload?.kind).toBe("content");
+    expect(payload?.rootContentJson).toBe(contentJsonForPlainText("Copied scene"));
+    expect(payload).not.toHaveProperty("descendants");
+    expect(useDocumentStore.getState().navigationPast).toHaveLength(0);
+    expect(useDocumentStore.getState().dirty).toBe(false);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("cuts the selected card subtree immediately in navigation mode", async () => {
+    let snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    snapshot = replaceCardContent(snapshot, {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Cut scene"),
+    });
+    snapshot = {
+      ...snapshot,
+      cards: snapshot.cards.concat({
+        documentId: "doc-1",
+        id: "card-a-1",
+        orderIndex: 0,
+        parentId: "card-a",
+        type: "card",
+      }),
+      contents: snapshot.contents.concat({
+        cardId: "card-a-1",
+        contentJson: contentJsonForPlainText("Cut child"),
+      }),
+    };
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const { data, event } = createClipboardEvent("cut");
+
+    await act(async () => {
+      window.dispatchEvent(event);
+    });
+
+    const payload = decodeCardClipboardPayload(
+      data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "",
+    );
+    const nextSnapshot = useDocumentStore.getState().snapshot;
+    const rootChildren = nextSnapshot?.cards
+      .filter((card) => card.parentId === "card-root")
+      .sort((left, right) => left.orderIndex - right.orderIndex);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(payload?.kind).toBe("subtree");
+    expect(payload && "descendants" in payload ? payload.descendants.map((card) => card.id) : []).toEqual([
+      "card-a-1",
+    ]);
+    expect(nextSnapshot?.cards.some((card) => card.id === "card-a")).toBe(false);
+    expect(nextSnapshot?.cards.some((card) => card.id === "card-a-1")).toBe(false);
+    expect(rootChildren?.map((card) => card.id)).toEqual(["card-b"]);
+    expect(useDocumentStore.getState().navigationPast).toHaveLength(1);
+    expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("pastes copied card content into an empty target card", async () => {
+    let snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    snapshot = replaceCardContent(snapshot, {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Copied scene"),
+    });
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const copy = createClipboardEvent("copy");
+
+    await act(async () => {
+      window.dispatchEvent(copy.event);
+    });
+
+    await act(async () => {
+      useInteractionStore.setState({
+        activeCardId: "card-b",
+      });
+    });
+
+    const paste = createClipboardEvent("paste", {
+      [CARD_CLIPBOARD_MIME_TYPE]: copy.data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "",
+      "text/plain": copy.data.get("text/plain") ?? "",
+    });
+
+    await act(async () => {
+      window.dispatchEvent(paste.event);
+    });
+
+    const nextContentJson = useDocumentStore
+      .getState()
+      .snapshot?.contents.find((content) => content.cardId === "card-b")?.contentJson;
+
+    expect(paste.event.defaultPrevented).toBe(true);
+    expect(contentText(nextContentJson ?? "")).toBe("Copied scene");
+    expect(useDocumentStore.getState().navigationPast).toHaveLength(1);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("pastes a cut subtree into another document's empty card", async () => {
+    let sourceSnapshot = makeDocumentSnapshot();
+    const destinationSnapshot = {
+      ...makeDocumentSnapshot(),
+      cards: makeDocumentSnapshot().cards.map((card) => ({
+        ...card,
+        documentId: "doc-2",
+      })),
+      contents: makeDocumentSnapshot().contents,
+      summary: {
+        documentId: "doc-2",
+        name: "Destination",
+        openedAtMs: 2,
+        path: "/tmp/destination.fable",
+      },
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    sourceSnapshot = replaceCardContent(sourceSnapshot, {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Moved scene"),
+    });
+    sourceSnapshot = {
+      ...sourceSnapshot,
+      cards: sourceSnapshot.cards.concat({
+        documentId: "doc-1",
+        id: "card-a-1",
+        orderIndex: 0,
+        parentId: "card-a",
+        type: "card",
+      }),
+      contents: sourceSnapshot.contents.concat({
+        cardId: "card-a-1",
+        contentJson: contentJsonForPlainText("Moved child"),
+      }),
+    };
+
+    useDocumentStore.getState().hydrateSnapshot(sourceSnapshot);
+    useAppStore.setState({
+      activeDocument: sourceSnapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(sourceSnapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={sourceSnapshot.summary} />);
+    });
+
+    const cut = createClipboardEvent("cut");
+
+    await act(async () => {
+      window.dispatchEvent(cut.event);
+    });
+
+    loadCurrentDocumentSnapshot.mockResolvedValue(destinationSnapshot);
+    await act(async () => {
+      useDocumentStore.getState().hydrateSnapshot(destinationSnapshot);
+      useAppStore.setState({
+        activeDocument: destinationSnapshot.summary,
+        mode: "navigation",
+        notice: null,
+        screen: "workspace",
+      });
+      useInteractionStore.setState({
+        activeCardId: "card-b",
+      });
+    });
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={destinationSnapshot.summary} />);
+    });
+
+    await act(async () => {});
+
+    const paste = createClipboardEvent("paste", {
+      [CARD_CLIPBOARD_MIME_TYPE]: cut.data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "",
+      "text/plain": cut.data.get("text/plain") ?? "",
+    });
+
+    await act(async () => {
+      window.dispatchEvent(paste.event);
+    });
+
+    const nextSnapshot = useDocumentStore.getState().snapshot;
+    const pastedChildren = nextSnapshot?.cards.filter((card) => card.parentId === "card-b") ?? [];
+
+    expect(contentText(nextSnapshot?.contents.find((content) => content.cardId === "card-b")?.contentJson ?? "")).toBe("Moved scene");
+    expect(pastedChildren).toHaveLength(1);
+    expect(pastedChildren[0]?.documentId).toBe("doc-2");
+    expect(contentText(nextSnapshot?.contents.find((content) => content.cardId === pastedChildren[0]?.id)?.contentJson ?? "")).toBe("Moved child");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("does not intercept copy, cut, or paste while editing", async () => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Editing scene"),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "editing",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    for (const type of ["copy", "cut", "paste"] as const) {
+      const { data, event } = createClipboardEvent(type, {
+        "text/plain": "plain text",
+      });
+
+      await act(async () => {
+        window.dispatchEvent(event);
+      });
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(data.get(CARD_CLIPBOARD_MIME_TYPE)).toBeUndefined();
+    }
+
+    expect(useDocumentStore.getState().dirty).toBe(false);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("ignores card clipboard operations while folder context is selected", async () => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-root",
+      contentJson: contentJsonForPlainText("Root scene"),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-root",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    const cut = createClipboardEvent("cut");
+
+    await act(async () => {
+      window.dispatchEvent(cut.event);
+    });
+
+    expect(cut.event.defaultPrevented).toBe(false);
+    expect(useDocumentStore.getState().snapshot?.cards.some((card) => card.id === "card-root")).toBe(true);
+    expect(useDocumentStore.getState().navigationPast).toHaveLength(0);
 
     await act(async () => {
       root.unmount();

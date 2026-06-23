@@ -9,8 +9,10 @@ pub mod storage;
 
 use app_state::AppState;
 use commands::{
-    create_document, load_current_document, load_current_document_clock, open_document,
-    read_text_file, save_current_document, save_document, write_text_file,
+    create_document, create_untitled_document_in_directory, delete_fable_document,
+    list_current_document_directory, list_fable_directory, load_current_document,
+    load_current_document_clock, open_document, read_text_file, rename_fable_document,
+    save_current_document, save_document, write_text_file,
 };
 use integrations::{
     enable_claude_desktop_integration, enable_codex_integration, load_local_integration_statuses,
@@ -28,15 +30,20 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             create_document,
+            create_untitled_document_in_directory,
+            delete_fable_document,
             enable_claude_desktop_integration,
             enable_codex_integration,
             invoke_mcp_tool,
+            list_current_document_directory,
+            list_fable_directory,
             list_mcp_tools,
             load_current_document,
             load_current_document_clock,
             load_local_integration_statuses,
             open_document,
             read_text_file,
+            rename_fable_document,
             save_current_document,
             save_document,
             write_text_file

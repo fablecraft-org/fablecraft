@@ -92,7 +92,9 @@ fn resolve_mcp_binary_path() -> AppResult<PathBuf> {
 }
 
 fn resolve_existing_mcp_binary_path() -> Option<PathBuf> {
-    mcp_binary_candidates().into_iter().find(|path| path.exists())
+    mcp_binary_candidates()
+        .into_iter()
+        .find(|path| path.exists())
 }
 
 fn mcp_binary_candidates() -> Vec<PathBuf> {
@@ -166,9 +168,12 @@ fn mcp_binary_name() -> &'static str {
 }
 
 fn home_directory() -> AppResult<PathBuf> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| AppError::not_found("home_directory_missing", "Fablecraft could not find the current home directory."))
+    env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+        AppError::not_found(
+            "home_directory_missing",
+            "Fablecraft could not find the current home directory.",
+        )
+    })
 }
 
 fn claude_desktop_config_path() -> AppResult<PathBuf> {
@@ -233,15 +238,23 @@ fn update_claude_config_contents(contents: Option<&str>, binary_path: &Path) -> 
         _ => JsonValue::Object(JsonMap::new()),
     };
 
-    let root = parsed
-        .as_object_mut()
-        .ok_or_else(|| AppError::invalid_input("claude_config_invalid", "Claude Desktop config must be a JSON object."))?;
+    let root = parsed.as_object_mut().ok_or_else(|| {
+        AppError::invalid_input(
+            "claude_config_invalid",
+            "Claude Desktop config must be a JSON object.",
+        )
+    })?;
 
     let mcp_servers = root
         .entry("mcpServers".to_string())
         .or_insert_with(|| JsonValue::Object(JsonMap::new()))
         .as_object_mut()
-        .ok_or_else(|| AppError::invalid_input("claude_config_invalid", "Claude Desktop mcpServers must be an object."))?;
+        .ok_or_else(|| {
+            AppError::invalid_input(
+                "claude_config_invalid",
+                "Claude Desktop mcpServers must be an object.",
+            )
+        })?;
 
     mcp_servers.insert(
         "fablecraft".to_string(),
@@ -410,7 +423,8 @@ url = "https://mcp.linear.app/mcp"
 
         assert!(updated.contains("[mcp_servers.linear]"));
         assert!(updated.contains("[mcp_servers.fablecraft]"));
-        assert!(updated.contains("command = \"/Applications/Fablecraft.app/Contents/MacOS/fablecraft-mcp\""));
+        assert!(updated
+            .contains("command = \"/Applications/Fablecraft.app/Contents/MacOS/fablecraft-mcp\""));
         assert!(
             codex_entry_present(Some(&updated)).expect("status should parse"),
             "Codex config should report Fablecraft as enabled"
@@ -419,11 +433,16 @@ url = "https://mcp.linear.app/mcp"
 
     #[test]
     fn includes_release_binary_when_searching_from_repo_root() {
-        let candidates = binary_candidates_from_directory(Path::new("/Users/callum/Developer/fablecraft"), "fablecraft-mcp");
+        let candidates = binary_candidates_from_directory(
+            Path::new("/Users/callum/Developer/fablecraft"),
+            "fablecraft-mcp",
+        );
 
         assert!(candidates.contains(
-            &Path::new("/Users/callum/Developer/fablecraft/src-tauri/target/release/fablecraft-mcp")
-                .to_path_buf()
+            &Path::new(
+                "/Users/callum/Developer/fablecraft/src-tauri/target/release/fablecraft-mcp"
+            )
+            .to_path_buf()
         ));
     }
 
@@ -435,8 +454,10 @@ url = "https://mcp.linear.app/mcp"
         );
 
         assert!(candidates.contains(
-            &Path::new("/Users/callum/Developer/fablecraft/src-tauri/target/release/fablecraft-mcp")
-                .to_path_buf()
+            &Path::new(
+                "/Users/callum/Developer/fablecraft/src-tauri/target/release/fablecraft-mcp"
+            )
+            .to_path_buf()
         ));
     }
 
@@ -489,11 +510,9 @@ args = []
 url = "https://mcp.linear.app/mcp"
 "#;
 
-        let updated = update_codex_config_contents(
-            Some(contents),
-            Path::new("/new/path/fablecraft-mcp"),
-        )
-        .expect("config should serialize");
+        let updated =
+            update_codex_config_contents(Some(contents), Path::new("/new/path/fablecraft-mcp"))
+                .expect("config should serialize");
 
         assert!(updated.contains("[mcp_servers.linear]"));
         assert!(updated.contains("command = \"/new/path/fablecraft-mcp\""));
@@ -515,11 +534,9 @@ url = "https://mcp.linear.app/mcp"
 
     #[test]
     fn codex_config_escapes_quotes_in_paths() {
-        let updated = update_codex_config_contents(
-            None,
-            Path::new("/some/path/with\"quote/fablecraft-mcp"),
-        )
-        .expect("config should serialize");
+        let updated =
+            update_codex_config_contents(None, Path::new("/some/path/with\"quote/fablecraft-mcp"))
+                .expect("config should serialize");
 
         assert!(updated.contains("command = \"/some/path/with\\\"quote/fablecraft-mcp\""));
     }

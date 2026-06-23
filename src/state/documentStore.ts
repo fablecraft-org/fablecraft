@@ -11,6 +11,7 @@ import {
   serializeDocumentRevisionSnapshot,
 } from "../domain/document/serialization";
 import type { DocumentSnapshot, SaveDocumentResult } from "../domain/document/types";
+import type { DocumentSummary } from "../types/document";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -37,6 +38,7 @@ interface DocumentState {
   updateSnapshot: (
     updater: (snapshot: DocumentSnapshot) => DocumentSnapshot,
   ) => void;
+  updateSummary: (summary: DocumentSummary) => void;
   undoEditing: () => void;
   undoNavigation: () => void;
 }
@@ -331,4 +333,16 @@ export const useDocumentStore = create<DocumentState>((set) => ({
         snapshot: history.present,
       };
     }),
+  updateSummary: (summary) =>
+    set((state) => ({
+      snapshot: state.snapshot
+        ? {
+            ...state.snapshot,
+            summary: {
+              ...state.snapshot.summary,
+              ...summary,
+            },
+          }
+        : null,
+    })),
 }));

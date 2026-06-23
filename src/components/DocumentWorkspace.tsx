@@ -1,7 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { CardEditor } from "./CardEditor";
+import { OverlayShell } from "./OverlayShell";
 import { TreeCardButton } from "./TreeCardButton";
 import { buildCardNumberMap } from "../domain/document/cardNumbers";
+import {
+  CARD_CLIPBOARD_MIME_TYPE,
+  createCardCopyPayload,
+  createCardCutPayload,
+  decodeCardClipboardPayload,
+  encodeCardClipboardPayload,
+  pasteCardClipboardPayload,
+  removeCutSubtree,
+  type CardClipboardPayload,
+} from "../domain/document/clipboard";
 import {
   canCreateCardsFromContent,
   cardContent,
@@ -21,6 +32,15 @@ import { createChildCard, createSiblingAfter, createSiblingBefore, deleteCardSub
 import { listenForFrontendMenuActions, type NativeMenuAction } from "../lib/nativeMenu";
 import { randomId } from "../lib/randomId";
 import { loadCurrentDocumentSnapshot } from "../storage/documentSnapshots";
+import {
+  createUntitledDocumentInDirectory,
+  deleteFableDocument,
+  listCurrentDocumentDirectory,
+  listFableDirectory,
+  renameFableDocument,
+  type FableDirectory,
+  type FableDirectoryEntry,
+} from "../storage/fableDirectory";
 import { useDocumentAutosave } from "../storage/useDocumentAutosave";
 import { useExternalDocumentReload } from "../storage/useExternalDocumentReload";
 import { useAppStore } from "../state/appStore";
@@ -34,10 +54,21 @@ import type { DocumentSummary } from "../types/document";
 interface DocumentWorkspaceProps {
   disableScrollPan?: boolean;
   document: DocumentSummary;
+  onDocumentCreated?: (document: DocumentSummary) => void;
+  onDocumentDeleted?: (path: string) => void;
+  onDocumentRenamed?: (document: DocumentSummary, previousPath: string) => void;
+  onOpenDocumentPath?: (path: string) => Promise<void> | void;
   suspendKeyboard?: boolean;
 }
 
 type EditorFocusPlacement = "end" | "start";
+type DeleteDocumentAction = "cancel" | "delete";
+type ExplorerSelection =
+  | { documentPath?: string; kind: "card"; parentPath?: string }
+  | { kind: "current-document" }
+  | { kind: "folder" }
+  | { kind: "entry"; path: string }
+  | { kind: "preview-entry"; parentPath: string; path: string };
 
 const OVERVIEW_CARD_WIDTH = 236;
 const OVERVIEW_CARD_HEIGHT = 72;
@@ -103,6 +134,117 @@ function viewportHeight() {
   return typeof window === "undefined" ? 800 : window.innerHeight;
 }
 
+function fileNameFromPath(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function explorerLabelForEntry(entry: FableDirectoryEntry) {
+  return entry.kind === "document"
+    ? entry.name.replace(/\.fable$/i, "")
+    : entry.name;
+}
+
+function documentNameWithoutExtension(pathOrName: string) {
+  return fileNameFromPath(pathOrName).replace(/\.fable$/i, "");
+}
+
+function entryId(entry: FableDirectoryEntry) {
+  return `${entry.kind}:${entry.path}`;
+}
+
+function ExplorerCard({
+  isActive,
+  isRenaming = false,
+  kind,
+  label,
+  meta,
+  onClick,
+  onRenameCancel,
+  onRenameCommit,
+  onRenameDraftChange,
+  renameDraft = "",
+  renameInputRef,
+  width,
+  x,
+  y,
+}: {
+  isActive: boolean;
+  isRenaming?: boolean;
+  kind: "folder" | "document";
+  label: string;
+  meta: string;
+  onClick: () => void;
+  onRenameCancel?: () => void;
+  onRenameCommit?: () => void;
+  onRenameDraftChange?: (value: string) => void;
+  renameDraft?: string;
+  renameInputRef?: RefObject<HTMLInputElement | null>;
+  width: number;
+  x: number;
+  y: number;
+}) {
+  function handleRenameKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      onRenameCommit?.();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onRenameCancel?.();
+      return;
+    }
+
+    event.stopPropagation();
+  }
+
+  return (
+    <button
+      className="absolute flex min-h-[var(--fc-card-height)] cursor-pointer appearance-none flex-col justify-center border-0 px-6 py-6 text-left transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
+      data-explorer-kind={kind}
+      data-is-active={String(isActive)}
+      data-testid="directory-card"
+      onClick={onClick}
+      style={{
+        backgroundColor:
+          kind === "folder"
+            ? "var(--fc-color-explorer-folder-surface)"
+            : "var(--fc-color-explorer-document-surface)",
+        boxShadow: isActive ? "var(--fc-shadow-elevated)" : "none",
+        left: `calc(50% + ${x}px)`,
+        minHeight: "var(--fc-card-height)",
+        top: `calc(50% + ${y}px)`,
+        transform: "translate(-50%, -50%)",
+        zIndex: isActive ? 3 : 1,
+        width: `${width}px`,
+      }}
+      type="button"
+    >
+      <span className="font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]">
+        {meta}
+      </span>
+      {isRenaming ? (
+        <input
+          ref={renameInputRef}
+          className="mt-2 w-full bg-transparent font-[var(--fc-font-ui)] text-[17px] font-semibold leading-tight text-[var(--fc-color-text)] outline-none"
+          onChange={(event) => onRenameDraftChange?.(event.currentTarget.value)}
+          onClick={(event) => event.stopPropagation()}
+          onInput={(event) => onRenameDraftChange?.(event.currentTarget.value)}
+          onKeyDown={handleRenameKeyDown}
+          value={renameDraft}
+        />
+      ) : (
+        <span className="mt-2 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-[var(--fc-font-ui)] text-[17px] font-semibold leading-tight text-[var(--fc-color-text)]">
+          {label}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function descendantCardIds(cards: DocumentSnapshot["cards"], cardId: string) {
   const descendants: string[] = [];
   const queue = [cardId];
@@ -139,9 +281,20 @@ function fallbackCardIdAfterEmptyAbandon(snapshot: DocumentSnapshot, cardId: str
 export function DocumentWorkspace({
   disableScrollPan = false,
   document,
+  onDocumentCreated,
+  onDocumentDeleted,
+  onDocumentRenamed,
+  onOpenDocumentPath,
   suspendKeyboard = false,
 }: DocumentWorkspaceProps) {
   const activeCardShellRef = useRef<HTMLDivElement | null>(null);
+  const cardClipboardFallbackRef = useRef<{
+    payload: CardClipboardPayload;
+    text: string;
+  } | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const cancelDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
+  const confirmDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
   const tabKeyHeldRef = useRef(false);
   const previousCenterTargetRef = useRef<{
     activeCardId: string | null;
@@ -157,10 +310,26 @@ export function DocumentWorkspace({
   const [cardHeights, setCardHeights] = useState<Record<string, number>>({});
   const [workspaceViewportHeight, setWorkspaceViewportHeight] =
     useState(viewportHeight);
+  const [directory, setDirectory] = useState<FableDirectory | null>(null);
+  const [previewDirectory, setPreviewDirectory] = useState<FableDirectory | null>(null);
+  const [directoryLoadError, setDirectoryLoadError] = useState<string | null>(null);
+  const [documentDeleteError, setDocumentDeleteError] = useState<string | null>(null);
+  const [pendingDeleteDocument, setPendingDeleteDocument] = useState<{
+    name: string;
+    path: string;
+  } | null>(null);
+  const [selectedDeleteDocumentAction, setSelectedDeleteDocumentAction] =
+    useState<DeleteDocumentAction>("cancel");
+  const [explorerSelection, setExplorerSelection] = useState<ExplorerSelection>({
+    kind: "card",
+  });
+  const [renamingDocumentPath, setRenamingDocumentPath] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const activeCardId = useInteractionStore((state) => state.activeCardId);
   const setActiveCardId = useInteractionStore((state) => state.setActiveCardId);
   const mode = useAppStore((state) => state.mode);
   const setMode = useAppStore((state) => state.setMode);
+  const setNotice = useAppStore((state) => state.setNotice);
   const uiPreferences = useSettingsStore((state) => state.preferences);
   const applyNavigationChange = useDocumentStore(
     (state) => state.applyNavigationChange,
@@ -172,6 +341,7 @@ export function DocumentWorkspace({
   const undoNavigation = useDocumentStore((state) => state.undoNavigation);
   const undoEditing = useDocumentStore((state) => state.undoEditing);
   const updateSnapshot = useDocumentStore((state) => state.updateSnapshot);
+  const updateSummary = useDocumentStore((state) => state.updateSummary);
   const uiMetrics = resolveUiMetrics(uiPreferences);
 
   function updateCardHeight(
@@ -223,8 +393,95 @@ export function DocumentWorkspace({
     };
   }, [document.documentId, hydrateSnapshot]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDirectory() {
+      try {
+        const nextDirectory = await listCurrentDocumentDirectory();
+
+        if (!cancelled) {
+          setDirectory(nextDirectory);
+          setPreviewDirectory(null);
+          setDirectoryLoadError(null);
+          setExplorerSelection({ kind: "card" });
+        }
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          setDirectory(null);
+          setDirectoryLoadError(
+            error instanceof Error ? error.message : "Could not read folder.",
+          );
+        }
+      }
+    }
+
+    void loadDirectory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [document.documentId]);
+
   const activeSnapshot =
     snapshot?.summary.documentId === document.documentId ? snapshot : null;
+  const isExplorerSelectionActive = explorerSelection.kind !== "card";
+  const selectedDirectoryEntry =
+    explorerSelection.kind === "entry"
+      ? directory?.entries.find((entry) => entry.path === explorerSelection.path) ?? null
+      : explorerSelection.kind === "preview-entry"
+        ? directory?.entries.find((entry) => entry.path === explorerSelection.parentPath) ?? null
+        : explorerSelection.kind === "card" && explorerSelection.parentPath
+          ? directory?.entries.find((entry) => entry.path === explorerSelection.parentPath) ?? null
+      : null;
+  const directoryEntries = directory?.entries ?? [];
+  const previewDirectoryEntries = previewDirectory?.entries ?? [];
+  const currentDocumentDirectoryEntry =
+    directoryEntries.find((entry) => entry.path === directory?.currentDocumentPath) ?? null;
+  const selectedPreviewEntry =
+    explorerSelection.kind === "preview-entry"
+      ? previewDirectoryEntries.find((entry) => entry.path === explorerSelection.path) ?? null
+      : explorerSelection.kind === "card" && explorerSelection.documentPath
+        ? previewDirectoryEntries.find((entry) => entry.path === explorerSelection.documentPath) ?? {
+            kind: "document",
+            name: fileNameFromPath(explorerSelection.documentPath),
+            path: explorerSelection.documentPath,
+          }
+      : null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPreviewDirectory(path: string) {
+      try {
+        const nextPreviewDirectory = await listFableDirectory(path);
+
+        if (!cancelled) {
+          setPreviewDirectory(nextPreviewDirectory);
+          setDirectoryLoadError(null);
+        }
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          setPreviewDirectory(null);
+          setDirectoryLoadError(
+            error instanceof Error ? error.message : "Could not read folder.",
+          );
+        }
+      }
+    }
+
+    if (selectedDirectoryEntry?.kind === "folder") {
+      void loadPreviewDirectory(selectedDirectoryEntry.path);
+    } else {
+      setPreviewDirectory(null);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDirectoryEntry?.kind, selectedDirectoryEntry?.path]);
   const measuredCardHeights =
     activeSnapshot
       ? Object.fromEntries(
@@ -316,6 +573,112 @@ export function DocumentWorkspace({
               ?.parentId ?? null,
         }))
       : [];
+  const columnWidth = uiMetrics.cardWidth + uiMetrics.spacing;
+  const explorerCardWidth = Math.round(uiMetrics.cardWidth / 2);
+  const explorerGap = uiMetrics.spacing;
+  const explorerColumnWidth = explorerCardWidth + explorerGap;
+  const explorerToDocumentOffset =
+    explorerCardWidth / 2 + uiMetrics.cardWidth / 2 + explorerGap;
+  const cardColumnShift =
+    explorerSelection.kind === "current-document" ||
+    (explorerSelection.kind === "preview-entry" &&
+      selectedPreviewEntry?.path === document.path)
+      ? explorerToDocumentOffset
+      : 0;
+  const shouldShowDocumentTree =
+    explorerSelection.kind !== "folder" &&
+    explorerSelection.kind !== "entry" &&
+    !(
+      explorerSelection.kind === "preview-entry" &&
+      selectedPreviewEntry?.path !== document.path
+    );
+  const currentDocumentName = directory
+    ? documentNameWithoutExtension(directory.currentDocumentPath)
+    : documentNameWithoutExtension(document.name);
+  const parentFolderName = directory?.parentFolderPath
+    ? fileNameFromPath(directory.parentFolderPath)
+    : null;
+  const selectedRenamableDocument =
+    explorerSelection.kind === "current-document" && directory
+      ? {
+          name: currentDocumentName,
+          path: directory.currentDocumentPath,
+        }
+      : explorerSelection.kind === "entry" && selectedDirectoryEntry?.kind === "document"
+        ? {
+            name: explorerLabelForEntry(selectedDirectoryEntry),
+            path: selectedDirectoryEntry.path,
+          }
+        : explorerSelection.kind === "preview-entry" && selectedPreviewEntry?.kind === "document"
+          ? {
+              name: explorerLabelForEntry(selectedPreviewEntry),
+            path: selectedPreviewEntry.path,
+          }
+        : null;
+  const selectedDeletableDocument = selectedRenamableDocument;
+  const isRenamingSelectedDocument =
+    Boolean(
+      selectedRenamableDocument &&
+      renamingDocumentPath === selectedRenamableDocument.path,
+    );
+  const explorerRowGap = uiMetrics.cardHeight + uiMetrics.spacing;
+  const explorerEntryY = (index: number) => {
+    if (explorerSelection.kind === "folder") {
+      return index * explorerRowGap;
+    }
+
+    if (explorerSelection.kind === "entry" || explorerSelection.kind === "current-document") {
+      const activeIndex =
+        explorerSelection.kind === "current-document"
+          ? directoryEntries.findIndex((entry) => entry.path === directory?.currentDocumentPath)
+          : selectedEntryIndex();
+      return (index - Math.max(0, activeIndex)) * explorerRowGap;
+    }
+
+    return (index - (directoryEntries.length - 1) / 2) * explorerRowGap;
+  };
+  const previewEntryY = (index: number) => {
+    if (explorerSelection.kind === "entry") {
+      return index * explorerRowGap;
+    }
+
+    if (
+      explorerSelection.kind === "preview-entry" ||
+      (explorerSelection.kind === "card" && selectedPreviewEntry)
+    ) {
+      const activeIndex = selectedPreviewEntryIndex();
+      return (index - Math.max(0, activeIndex)) * explorerRowGap;
+    }
+
+    return (index - (previewDirectoryEntries.length - 1) / 2) *
+      explorerRowGap;
+  };
+  const shouldRenderDirectoryEntryColumn =
+    explorerSelection.kind === "folder" ||
+    explorerSelection.kind === "entry" ||
+    (explorerSelection.kind === "current-document" && Boolean(currentDocumentDirectoryEntry));
+  const shouldRenderCurrentDocumentFallback =
+    (explorerSelection.kind === "current-document" && !currentDocumentDirectoryEntry) ||
+    (explorerSelection.kind === "card" && !selectedPreviewEntry);
+  const shouldRenderPreviewEntryColumn =
+    selectedDirectoryEntry?.kind === "folder" &&
+    (explorerSelection.kind === "entry" ||
+      explorerSelection.kind === "preview-entry" ||
+      (explorerSelection.kind === "card" && Boolean(selectedPreviewEntry)));
+  const shouldRenderPreviewEntryFallback =
+    explorerSelection.kind === "card" &&
+    selectedPreviewEntry &&
+    !shouldRenderPreviewEntryColumn;
+  const explorerPanLimit = directoryEntries.reduce(
+    (limit, _entry, index) =>
+      Math.max(limit, Math.abs(explorerEntryY(index)) + uiMetrics.cardHeight),
+    uiMetrics.cardHeight,
+  );
+  const previewPanLimit = previewDirectoryEntries.reduce(
+    (limit, _entry, index) =>
+      Math.max(limit, Math.abs(previewEntryY(index)) + uiMetrics.cardHeight),
+    uiMetrics.cardHeight,
+  );
   const emptyChildGap = isOverviewMode ? null : normalStageLayoutResult.emptyChildGap;
   const overviewConnectors = isOverviewMode ? overviewLayoutResult.connectors : [];
   const stagePanLimit = positionedCards.reduce(
@@ -325,6 +688,15 @@ export function DocumentWorkspace({
     }),
     { x: layoutMetrics.cardWidth, y: layoutMetrics.cardHeight },
   );
+  if (directory && !isOverviewMode) {
+    stagePanLimit.x = Math.max(
+      stagePanLimit.x,
+      explorerToDocumentOffset +
+        columnWidth +
+        explorerColumnWidth * 3,
+    );
+    stagePanLimit.y = Math.max(stagePanLimit.y, explorerPanLimit, previewPanLimit);
+  }
   if (emptyChildGap && !isOverviewMode) {
     stagePanLimit.x = Math.max(stagePanLimit.x, Math.abs(emptyChildGap.x) + layoutMetrics.cardWidth);
     stagePanLimit.y = Math.max(stagePanLimit.y, Math.abs(emptyChildGap.y) + emptyChildGap.height);
@@ -370,6 +742,367 @@ export function DocumentWorkspace({
     setPendingEditorTextInput(textInput);
     setMode("editing");
     return true;
+  }
+
+  async function openDirectory(path: string) {
+    try {
+      const nextDirectory = await listFableDirectory(path);
+      setDirectory(nextDirectory);
+      setPreviewDirectory(null);
+      setDirectoryLoadError(null);
+      selectExplorer({ kind: "folder" });
+      setMode("navigation");
+    } catch (error) {
+      console.error(error);
+      setDirectoryLoadError(
+        error instanceof Error ? error.message : "Could not read folder.",
+      );
+    }
+  }
+
+  async function createDocumentInCurrentDirectory() {
+    if (!directory) {
+      return;
+    }
+
+    try {
+      const nextDocument = await createUntitledDocumentInDirectory(directory.folderPath);
+      onDocumentCreated?.(nextDocument);
+      setDirectory(await listCurrentDocumentDirectory());
+      selectExplorer({ kind: "card" });
+      setMode("editing");
+    } catch (error) {
+      console.error(error);
+      setDirectoryLoadError(
+        error instanceof Error ? error.message : "Could not create document.",
+      );
+    }
+  }
+
+  function startRenamingSelectedDocument() {
+    if (!selectedRenamableDocument) {
+      return false;
+    }
+
+    setRenamingDocumentPath(selectedRenamableDocument.path);
+    setRenameDraft(selectedRenamableDocument.name);
+    setMode("navigation");
+    setStageOffset({ x: 0, y: 0 });
+    return true;
+  }
+
+  function cancelRename() {
+    setRenamingDocumentPath(null);
+    setRenameDraft("");
+  }
+
+  function startDeletingSelectedDocument() {
+    if (!selectedDeletableDocument) {
+      return false;
+    }
+
+    setDocumentDeleteError(null);
+    setSelectedDeleteDocumentAction("cancel");
+    setPendingDeleteDocument(selectedDeletableDocument);
+    setMode("navigation");
+    return true;
+  }
+
+  function cancelDeleteDocument() {
+    setDocumentDeleteError(null);
+    setPendingDeleteDocument(null);
+  }
+
+  async function refreshDirectoryAfterRename(
+    previousPath: string,
+    nextDocument: DocumentSummary,
+  ) {
+    const nextDirectory = directory
+      ? await listFableDirectory(directory.folderPath)
+      : await listCurrentDocumentDirectory();
+    setDirectory(nextDirectory);
+
+    if (previewDirectory) {
+      const previewFolderPath = previewDirectory.folderPath;
+      setPreviewDirectory(await listFableDirectory(previewFolderPath));
+    }
+
+    if (explorerSelection.kind === "entry" && explorerSelection.path === previousPath) {
+      selectExplorer({ kind: "entry", path: nextDocument.path });
+    } else if (
+      explorerSelection.kind === "preview-entry" &&
+      explorerSelection.path === previousPath
+    ) {
+      selectExplorer({
+        kind: "preview-entry",
+        parentPath: explorerSelection.parentPath,
+        path: nextDocument.path,
+      });
+    } else if (
+      explorerSelection.kind === "card" &&
+      explorerSelection.documentPath === previousPath
+    ) {
+      selectExplorer({
+        ...explorerSelection,
+        documentPath: nextDocument.path,
+      });
+    } else {
+      setStageOffset({ x: 0, y: 0 });
+    }
+  }
+
+  async function commitRename() {
+    if (!renamingDocumentPath) {
+      return;
+    }
+
+    const previousPath = renamingDocumentPath;
+
+    try {
+      const nextDocument = await renameFableDocument(previousPath, renameDraft);
+      cancelRename();
+      setDirectoryLoadError(null);
+      await refreshDirectoryAfterRename(previousPath, nextDocument);
+
+      if (previousPath === document.path) {
+        updateSummary(nextDocument);
+        onDocumentRenamed?.(nextDocument, previousPath);
+      }
+    } catch (error) {
+      console.error(error);
+      setDirectoryLoadError(
+        error instanceof Error ? error.message : "Could not rename document.",
+      );
+    }
+  }
+
+  async function refreshDirectoryAfterDelete(deletedPath: string) {
+    const nextDirectory = directory
+      ? await listFableDirectory(directory.folderPath)
+      : await listCurrentDocumentDirectory();
+    setDirectory(nextDirectory);
+
+    if (previewDirectory) {
+      const previewFolderPath = previewDirectory.folderPath;
+      setPreviewDirectory(await listFableDirectory(previewFolderPath));
+    }
+
+    if (explorerSelection.kind === "entry" && explorerSelection.path === deletedPath) {
+      selectExplorer({ kind: "folder" });
+      return;
+    }
+
+    if (
+      explorerSelection.kind === "preview-entry" &&
+      explorerSelection.path === deletedPath
+    ) {
+      selectExplorer({
+        kind: "entry",
+        path: explorerSelection.parentPath,
+      });
+      return;
+    }
+
+    if (
+      explorerSelection.kind === "card" &&
+      explorerSelection.documentPath === deletedPath &&
+      explorerSelection.parentPath
+    ) {
+      selectExplorer({
+        kind: "entry",
+        path: explorerSelection.parentPath,
+      });
+      return;
+    }
+
+    setStageOffset({ x: 0, y: 0 });
+  }
+
+  async function commitDeleteDocument() {
+    if (!pendingDeleteDocument) {
+      return;
+    }
+
+    const deletedDocument = pendingDeleteDocument;
+
+    try {
+      await deleteFableDocument(deletedDocument.path);
+      setPendingDeleteDocument(null);
+      setDocumentDeleteError(null);
+
+      if (deletedDocument.path === document.path) {
+        onDocumentDeleted?.(deletedDocument.path);
+        return;
+      }
+
+      await refreshDirectoryAfterDelete(deletedDocument.path);
+      setNotice({
+        tone: "info",
+        message: `Deleted "${deletedDocument.name}".`,
+      });
+    } catch (error) {
+      console.error(error);
+      setDocumentDeleteError(
+        error instanceof Error ? error.message : "Could not delete document.",
+      );
+    }
+  }
+
+  function activateDeleteDialogAction(action: DeleteDocumentAction) {
+    if (action === "cancel") {
+      cancelDeleteDocument();
+      return;
+    }
+
+    void commitDeleteDocument();
+  }
+
+  function firstRootCardId() {
+    return activeSnapshot?.cards
+      .filter((card) => card.parentId === null)
+      .sort((left, right) => left.orderIndex - right.orderIndex || left.id.localeCompare(right.id))[0]?.id ?? null;
+  }
+
+  function selectEntryAtIndex(index: number) {
+    const entry = directoryEntries[index];
+
+    if (!entry) {
+      return false;
+    }
+
+    selectExplorer({ kind: "entry", path: entry.path });
+    setMode("navigation");
+    return true;
+  }
+
+  function selectedEntryIndex() {
+    if (explorerSelection.kind !== "entry") {
+      return -1;
+    }
+
+    return directoryEntries.findIndex((entry) => entry.path === explorerSelection.path);
+  }
+
+  function selectPreviewEntryAtIndex(index: number) {
+    if (!selectedDirectoryEntry) {
+      return false;
+    }
+
+    const entry = previewDirectoryEntries[index];
+
+    if (!entry) {
+      return false;
+    }
+
+    selectExplorer({
+      kind: "preview-entry",
+      parentPath: selectedDirectoryEntry.path,
+      path: entry.path,
+    });
+    setMode("navigation");
+    return true;
+  }
+
+  async function selectFirstVisibleChildOfFolder(entry: FableDirectoryEntry) {
+    if (entry.kind !== "folder") {
+      return false;
+    }
+
+    try {
+      const nextPreviewDirectory =
+        previewDirectory?.folderPath === entry.path
+          ? previewDirectory
+          : await listFableDirectory(entry.path);
+      const firstVisibleChild = nextPreviewDirectory.entries[0];
+
+      setPreviewDirectory(nextPreviewDirectory);
+
+      if (!firstVisibleChild) {
+        await openDirectory(entry.path);
+        return true;
+      }
+
+      selectExplorer({
+        kind: "preview-entry",
+        parentPath: entry.path,
+        path: firstVisibleChild.path,
+      });
+      setMode("navigation");
+      return true;
+    } catch (error) {
+      console.error(error);
+      setDirectoryLoadError(
+        error instanceof Error ? error.message : "Could not read folder.",
+      );
+      return false;
+    }
+  }
+
+  function selectedPreviewEntryIndex() {
+    if (explorerSelection.kind === "preview-entry") {
+      return previewDirectoryEntries.findIndex((entry) => entry.path === explorerSelection.path);
+    }
+
+    if (explorerSelection.kind === "card" && explorerSelection.documentPath) {
+      return previewDirectoryEntries.findIndex(
+        (entry) => entry.path === explorerSelection.documentPath,
+      );
+    }
+
+    return -1;
+  }
+
+  async function activateExplorerEntry(entry: FableDirectoryEntry | null) {
+    if (!entry) {
+      return false;
+    }
+
+    if (entry.kind === "folder") {
+      await openDirectory(entry.path);
+      return true;
+    }
+
+    if (entry.path === document.path) {
+      selectExplorer({ kind: "card" });
+      const rootId = firstRootCardId();
+
+      if (rootId) {
+        setActiveCardId(rootId);
+      }
+      return true;
+    }
+
+    await onOpenDocumentPath?.(entry.path);
+    return true;
+  }
+
+  function preserveDocumentTreeExplorerContext() {
+    setExplorerSelection((currentSelection) =>
+      currentSelection.kind === "card" ? currentSelection : { kind: "card" },
+    );
+    setStageOffset({ x: 0, y: 0 });
+  }
+
+  function selectExplorer(selection: ExplorerSelection) {
+    setExplorerSelection(selection);
+    setStageOffset({ x: 0, y: 0 });
+  }
+
+  function renamePropsForDocument(path: string) {
+    if (renamingDocumentPath !== path) {
+      return {};
+    }
+
+    return {
+      isRenaming: true,
+      onRenameCancel: cancelRename,
+      onRenameCommit: () => {
+        void commitRename();
+      },
+      onRenameDraftChange: setRenameDraft,
+      renameDraft,
+      renameInputRef,
+    };
   }
 
   function createRelativeCard(direction: "before" | "after" | "child") {
@@ -438,6 +1171,56 @@ export function DocumentWorkspace({
         : mergeCardWithNextSibling(snapshotToChange, cardId),
     );
     return focusCardForEditing(cardId, "end");
+  }
+
+  function writeCardClipboardPayload(
+    event: ClipboardEvent,
+    payload: CardClipboardPayload,
+  ) {
+    const payloadJson = JSON.stringify(payload);
+    const fallbackText = encodeCardClipboardPayload(payload);
+
+    event.clipboardData?.setData(CARD_CLIPBOARD_MIME_TYPE, payloadJson);
+    event.clipboardData?.setData("text/plain", fallbackText);
+    cardClipboardFallbackRef.current = {
+      payload,
+      text: fallbackText,
+    };
+  }
+
+  function readCardClipboardPayload(event: ClipboardEvent) {
+    const clipboardData = event.clipboardData;
+    const mimePayload = clipboardData?.getData(CARD_CLIPBOARD_MIME_TYPE) ?? "";
+    const textPayload = clipboardData?.getData("text/plain") ?? "";
+    const decodedPayload =
+      decodeCardClipboardPayload(mimePayload) ??
+      decodeCardClipboardPayload(textPayload);
+
+    if (decodedPayload) {
+      return decodedPayload;
+    }
+
+    const fallback = cardClipboardFallbackRef.current;
+
+    if (!clipboardData && fallback) {
+      return fallback.payload;
+    }
+
+    if (fallback && textPayload === fallback.text) {
+      return fallback.payload;
+    }
+
+    return null;
+  }
+
+  function canHandleCardClipboard() {
+    return (
+      !suspendKeyboard &&
+      !pendingDeleteDocument &&
+      mode === "navigation" &&
+      explorerSelection.kind === "card" &&
+      Boolean(activeSnapshot && activeCardId)
+    );
   }
 
   function handleFrontendMenuAction(action: NativeMenuAction) {
@@ -594,6 +1377,80 @@ export function DocumentWorkspace({
     uiPreferences.lineHeight,
     uiPreferences.textSize,
   ]);
+
+  useEffect(() => {
+    if (!renamingDocumentPath) {
+      return;
+    }
+
+    if (selectedRenamableDocument?.path !== renamingDocumentPath) {
+      setRenamingDocumentPath(null);
+      setRenameDraft("");
+    }
+  }, [renamingDocumentPath, selectedRenamableDocument?.path]);
+
+  useEffect(() => {
+    if (!renamingDocumentPath) {
+      return;
+    }
+
+    const input = renameInputRef.current;
+    input?.focus();
+    input?.select();
+  }, [renamingDocumentPath]);
+
+  useEffect(() => {
+    if (!pendingDeleteDocument) {
+      return;
+    }
+
+    const button =
+      selectedDeleteDocumentAction === "cancel"
+        ? cancelDeleteButtonRef.current
+        : confirmDeleteButtonRef.current;
+    button?.focus();
+  }, [pendingDeleteDocument, selectedDeleteDocumentAction]);
+
+  useEffect(() => {
+    if (!pendingDeleteDocument) {
+      return;
+    }
+
+    function handleDeleteDialogKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelDeleteDocument();
+        return;
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        setSelectedDeleteDocumentAction("cancel");
+        return;
+      }
+
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        setSelectedDeleteDocumentAction("delete");
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        activateDeleteDialogAction(selectedDeleteDocumentAction);
+      }
+    }
+
+    window.addEventListener("keydown", handleDeleteDialogKeyDown, true);
+
+    return () => {
+      window.removeEventListener("keydown", handleDeleteDialogKeyDown, true);
+    };
+  }, [pendingDeleteDocument, selectedDeleteDocumentAction]);
 
   useLayoutEffect(() => {
     if (!activeCardId || isOverviewMode) {
@@ -813,6 +1670,14 @@ export function DocumentWorkspace({
         return;
       }
 
+      if (pendingDeleteDocument) {
+        return;
+      }
+
+      if (renamingDocumentPath) {
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && event.key === "-") {
         event.preventDefault();
         enterOverviewMode();
@@ -831,6 +1696,165 @@ export function DocumentWorkspace({
       if (isOverviewMode && event.key === "Enter") {
         event.preventDefault();
         exitOverviewMode();
+        return;
+      }
+
+      if (mode === "navigation" && explorerSelection.kind !== "card") {
+        if (event.key === "Enter" && selectedRenamableDocument) {
+          event.preventDefault();
+          startRenamingSelectedDocument();
+          return;
+        }
+
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          event.key === "ArrowRight" &&
+          explorerSelection.kind === "folder"
+        ) {
+          event.preventDefault();
+          void createDocumentInCurrentDirectory();
+          return;
+        }
+
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+
+          if (explorerSelection.kind === "current-document") {
+            selectExplorer({ kind: "folder" });
+            return;
+          }
+
+          if (explorerSelection.kind === "entry") {
+            selectExplorer({ kind: "folder" });
+            return;
+          }
+
+          if (explorerSelection.kind === "preview-entry") {
+            selectExplorer({
+              kind: "entry",
+              path: explorerSelection.parentPath,
+            });
+            return;
+          }
+
+          if (explorerSelection.kind === "folder" && directory?.parentFolderPath) {
+            void openDirectory(directory.parentFolderPath);
+          }
+          return;
+        }
+
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+
+          if (explorerSelection.kind === "current-document") {
+            const rootId = firstRootCardId();
+
+            if (rootId) {
+              setActiveCardId(rootId);
+            }
+            selectExplorer({ kind: "card" });
+            return;
+          }
+
+          if (explorerSelection.kind === "folder") {
+            selectEntryAtIndex(0);
+            return;
+          }
+
+          if (explorerSelection.kind === "entry") {
+            if (selectedDirectoryEntry?.kind === "folder") {
+              void selectFirstVisibleChildOfFolder(selectedDirectoryEntry);
+              return;
+            }
+
+            void activateExplorerEntry(selectedDirectoryEntry);
+            return;
+          }
+
+          if (explorerSelection.kind === "preview-entry") {
+            if (!selectedPreviewEntry) {
+              return;
+            }
+
+            if (selectedPreviewEntry.kind === "folder") {
+              void openDirectory(selectedPreviewEntry.path);
+              return;
+            }
+
+            if (selectedPreviewEntry.path === document.path) {
+              const rootId = firstRootCardId();
+
+              if (rootId) {
+                setActiveCardId(rootId);
+              }
+              selectExplorer({
+                documentPath: selectedPreviewEntry.path,
+                kind: "card",
+                parentPath: explorerSelection.parentPath,
+              });
+              return;
+            }
+
+            void onOpenDocumentPath?.(selectedPreviewEntry.path);
+            return;
+          }
+        }
+
+        if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+          event.preventDefault();
+
+          const direction = event.key === "ArrowUp" ? -1 : 1;
+          const currentIndex =
+            explorerSelection.kind === "entry"
+              ? selectedEntryIndex()
+              : explorerSelection.kind === "preview-entry"
+                ? selectedPreviewEntryIndex()
+              : directoryEntries.findIndex((entry) => entry.path === document.path);
+          const activeEntries =
+            explorerSelection.kind === "preview-entry"
+              ? previewDirectoryEntries
+              : directoryEntries;
+          const fallbackIndex = direction > 0 ? 0 : activeEntries.length - 1;
+          const nextIndex =
+            currentIndex === -1
+              ? fallbackIndex
+              : Math.max(0, Math.min(activeEntries.length - 1, currentIndex + direction));
+
+          if (explorerSelection.kind === "preview-entry") {
+            selectPreviewEntryAtIndex(nextIndex);
+          } else {
+            selectEntryAtIndex(nextIndex);
+          }
+          return;
+        }
+
+        if (
+          event.key === "Enter" &&
+          (explorerSelection.kind === "entry" ||
+            explorerSelection.kind === "preview-entry")
+        ) {
+          event.preventDefault();
+          void activateExplorerEntry(
+            explorerSelection.kind === "preview-entry"
+              ? selectedPreviewEntry
+              : selectedDirectoryEntry,
+          );
+          return;
+        }
+
+        if (event.key === "Enter") {
+          event.preventDefault();
+          return;
+        }
+
+        if (event.key === "Backspace" || event.key === "Delete") {
+          event.preventDefault();
+          if (selectedDeletableDocument) {
+            startDeletingSelectedDocument();
+          }
+          return;
+        }
+
         return;
       }
 
@@ -978,10 +2002,31 @@ export function DocumentWorkspace({
                 : null;
 
       if (!nextCardId) {
+        if (
+          event.key === "ArrowLeft" &&
+          selectedCard?.parentId === null &&
+          directory
+        ) {
+          event.preventDefault();
+          selectExplorer(
+            explorerSelection.kind === "card" &&
+              explorerSelection.parentPath &&
+              explorerSelection.documentPath
+              ? {
+                  kind: "preview-entry",
+                  parentPath: explorerSelection.parentPath,
+                  path: explorerSelection.documentPath,
+                }
+              : { kind: "current-document" },
+          );
+          setPendingEditorFocusPlacement(null);
+          setPendingEditorTextInput(null);
+        }
         return;
       }
 
       event.preventDefault();
+      preserveDocumentTreeExplorerContext();
       setActiveCardId(nextCardId);
       setPendingEditorFocusPlacement(null);
       setPendingEditorTextInput(null);
@@ -1010,11 +2055,19 @@ export function DocumentWorkspace({
     activeCardId,
     activeSnapshot,
     applyNavigationChange,
+    directory,
+    directoryEntries,
+    explorerSelection,
     isOverviewMode,
     mode,
+    previewDirectoryEntries,
+    pendingDeleteDocument,
     redoNavigation,
     redoEditing,
     selectedCard?.parentId,
+    selectedDeletableDocument,
+    selectedDirectoryEntry,
+    selectedPreviewEntry,
     selectedCardContent,
     setActiveCardId,
     setMode,
@@ -1038,6 +2091,133 @@ export function DocumentWorkspace({
     undoEditing,
   ]);
 
+  useEffect(() => {
+    function handleCopy(event: ClipboardEvent) {
+      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) {
+        return;
+      }
+
+      try {
+        const payload = createCardCopyPayload(activeSnapshot, activeCardId);
+
+        event.preventDefault();
+        writeCardClipboardPayload(event, payload);
+        setNotice({
+          tone: "info",
+          message: "Copied card content.",
+        });
+      } catch (error) {
+        console.error(error);
+        setNotice({
+          tone: "error",
+          message: "Fablecraft could not copy that card.",
+        });
+      }
+    }
+
+    function handleCut(event: ClipboardEvent) {
+      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) {
+        return;
+      }
+
+      try {
+        const payload = createCardCutPayload(activeSnapshot, activeCardId);
+        const fallbackCardId =
+          activeSnapshot.cards.length <= 1
+            ? activeCardId
+            : fallbackCardIdAfterDelete(activeSnapshot, activeCardId) ?? activeCardId;
+
+        event.preventDefault();
+        writeCardClipboardPayload(event, payload);
+        applyNavigationChange((snapshotToChange) =>
+          removeCutSubtree(snapshotToChange, activeCardId),
+        );
+        setActiveCardId(fallbackCardId);
+        setPendingEditorFocusPlacement(null);
+        setPendingEditorTextInput(null);
+        setNotice({
+          tone: "info",
+          message: "Cut card subtree.",
+        });
+      } catch (error) {
+        console.error(error);
+        setNotice({
+          tone: "error",
+          message: "Fablecraft could not cut that card.",
+        });
+      }
+    }
+
+    function handlePaste(event: ClipboardEvent) {
+      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) {
+        return;
+      }
+
+      const payload = readCardClipboardPayload(event);
+
+      if (!payload) {
+        event.preventDefault();
+        setNotice({
+          tone: "error",
+          message: "Clipboard does not contain a Fablecraft card.",
+        });
+        return;
+      }
+
+      try {
+        const nextSnapshot = pasteCardClipboardPayload(
+          activeSnapshot,
+          activeCardId,
+          payload,
+          () => randomId("card"),
+        );
+
+        event.preventDefault();
+        applyNavigationChange(() => nextSnapshot);
+        setActiveCardId(activeCardId);
+        setPendingEditorFocusPlacement(null);
+        setPendingEditorTextInput(null);
+        setNotice({
+          tone: "info",
+          message:
+            payload.kind === "subtree"
+              ? "Pasted card subtree."
+              : "Pasted card content.",
+        });
+      } catch (error) {
+        event.preventDefault();
+        console.error(error);
+        setNotice({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Fablecraft could not paste that card.",
+        });
+      }
+    }
+
+    window.addEventListener("copy", handleCopy);
+    window.addEventListener("cut", handleCut);
+    window.addEventListener("paste", handlePaste);
+
+    return () => {
+      window.removeEventListener("copy", handleCopy);
+      window.removeEventListener("cut", handleCut);
+      window.removeEventListener("paste", handlePaste);
+    };
+  }, [
+    activeCardId,
+    activeSnapshot,
+    applyNavigationChange,
+    explorerSelection.kind,
+    mode,
+    pendingDeleteDocument,
+    setActiveCardId,
+    setNotice,
+    suspendKeyboard,
+  ]);
+
   return (
     <section className="relative flex h-full w-full items-stretch overflow-hidden">
       <div
@@ -1045,7 +2225,189 @@ export function DocumentWorkspace({
         className="relative h-full w-full overflow-hidden"
         onWheel={handleStageWheel}
       >
-        {emptyChildGap && !isOverviewMode ? (
+        {directory && !isOverviewMode ? (
+          <>
+            {parentFolderName && explorerSelection.kind === "folder" ? (
+              <ExplorerCard
+                isActive={false}
+                kind="folder"
+                label={parentFolderName}
+                meta="FOLDER"
+                onClick={() => {
+                  if (directory.parentFolderPath) {
+                    void openDirectory(directory.parentFolderPath);
+                  }
+                }}
+                width={explorerCardWidth}
+                x={-explorerColumnWidth + stageOffset.x}
+                y={stageOffset.y}
+              />
+            ) : null}
+            {explorerSelection.kind !== "preview-entry" &&
+            explorerSelection.kind !== "card" ? (
+              <ExplorerCard
+                isActive={explorerSelection.kind === "folder"}
+                kind="folder"
+                label={directory.folderName}
+                meta="FOLDER"
+                onClick={() => {
+                  selectExplorer({ kind: "folder" });
+                  setMode("navigation");
+                }}
+                width={explorerCardWidth}
+                x={
+                  explorerSelection.kind === "folder"
+                    ? stageOffset.x
+                    : explorerSelection.kind === "entry"
+                      ? -explorerColumnWidth + stageOffset.x
+                      : -explorerColumnWidth + stageOffset.x
+                }
+                y={stageOffset.y}
+              />
+            ) : null}
+            {(explorerSelection.kind === "preview-entry" ||
+              (explorerSelection.kind === "card" && selectedPreviewEntry)) &&
+            selectedDirectoryEntry ? (
+              <ExplorerCard
+                isActive={false}
+                kind={selectedDirectoryEntry.kind === "folder" ? "folder" : "document"}
+                label={explorerLabelForEntry(selectedDirectoryEntry)}
+                meta={selectedDirectoryEntry.kind === "folder" ? "FOLDER" : "FABLE"}
+                onClick={() => {
+                  selectExplorer({
+                    kind: "entry",
+                    path: selectedDirectoryEntry.path,
+                  });
+                  setMode("navigation");
+                }}
+                width={explorerCardWidth}
+                {...(selectedDirectoryEntry.kind === "document"
+                  ? renamePropsForDocument(selectedDirectoryEntry.path)
+                  : {})}
+                x={
+                  explorerSelection.kind === "card"
+                    ? -explorerToDocumentOffset - explorerColumnWidth + stageOffset.x
+                    : -explorerColumnWidth + stageOffset.x
+                }
+                y={stageOffset.y}
+              />
+            ) : null}
+            {shouldRenderDirectoryEntryColumn ? (
+              directoryEntries.map((entry, index) => (
+                <ExplorerCard
+                  isActive={
+                    explorerSelection.kind === "current-document"
+                      ? entry.path === directory.currentDocumentPath
+                      : explorerSelection.kind === "entry" &&
+                        explorerSelection.path === entry.path
+                  }
+                  key={entryId(entry)}
+                  kind={entry.kind === "folder" ? "folder" : "document"}
+                  label={explorerLabelForEntry(entry)}
+                  meta={entry.kind === "folder" ? "FOLDER" : "FABLE"}
+                  onClick={() => {
+                    selectExplorer({ kind: "entry", path: entry.path });
+                    setMode("navigation");
+                  }}
+                  width={explorerCardWidth}
+                  {...(entry.kind === "document"
+                    ? renamePropsForDocument(entry.path)
+                    : {})}
+                  x={
+                    explorerSelection.kind === "folder"
+                      ? explorerColumnWidth + stageOffset.x
+                      : stageOffset.x
+                  }
+                  y={explorerEntryY(index) + stageOffset.y}
+                />
+              ))
+            ) : shouldRenderCurrentDocumentFallback ? (
+              <ExplorerCard
+                isActive={explorerSelection.kind === "current-document"}
+                kind="document"
+                label={currentDocumentName}
+                meta="FABLE"
+                onClick={() => {
+                  selectExplorer({ kind: "current-document" });
+                  setMode("navigation");
+                }}
+                width={explorerCardWidth}
+                {...renamePropsForDocument(directory?.currentDocumentPath ?? document.path)}
+                x={
+                  explorerSelection.kind === "current-document"
+                    ? stageOffset.x
+                    : -explorerToDocumentOffset + stageOffset.x
+                }
+                y={stageOffset.y}
+              />
+            ) : null}
+            {shouldRenderPreviewEntryColumn ? (
+              previewDirectoryEntries.map((entry, index) => (
+                <ExplorerCard
+                  isActive={
+                    explorerSelection.kind === "preview-entry" &&
+                    explorerSelection.path === entry.path
+                  }
+                  key={`preview:${entryId(entry)}`}
+                  kind={entry.kind === "folder" ? "folder" : "document"}
+                  label={explorerLabelForEntry(entry)}
+                  meta={entry.kind === "folder" ? "FOLDER" : "FABLE"}
+                  onClick={() => {
+                    if (entry.kind === "folder") {
+                      void openDirectory(entry.path);
+                      return;
+                    }
+
+                    void onOpenDocumentPath?.(entry.path);
+                  }}
+                  width={explorerCardWidth}
+                  {...(entry.kind === "document"
+                    ? renamePropsForDocument(entry.path)
+                    : {})}
+                  x={
+                    explorerSelection.kind === "entry"
+                      ? explorerColumnWidth + stageOffset.x
+                      : explorerSelection.kind === "card"
+                        ? -explorerToDocumentOffset + stageOffset.x
+                        : stageOffset.x
+                  }
+                  y={previewEntryY(index) + stageOffset.y}
+                />
+              ))
+            ) : null}
+            {shouldRenderPreviewEntryFallback ? (
+              <ExplorerCard
+                isActive={false}
+                kind={selectedPreviewEntry.kind === "folder" ? "folder" : "document"}
+                label={explorerLabelForEntry(selectedPreviewEntry)}
+                meta={selectedPreviewEntry.kind === "folder" ? "FOLDER" : "FABLE"}
+                onClick={() => {
+                  selectExplorer({
+                    kind: "preview-entry",
+                    parentPath: explorerSelection.parentPath ?? "",
+                    path: selectedPreviewEntry.path,
+                  });
+                  setMode("navigation");
+                }}
+                width={explorerCardWidth}
+                {...(selectedPreviewEntry.kind === "document"
+                  ? renamePropsForDocument(selectedPreviewEntry.path)
+                  : {})}
+                x={-explorerToDocumentOffset + stageOffset.x}
+                y={stageOffset.y}
+              />
+            ) : null}
+          </>
+        ) : null}
+        {directoryLoadError && !isOverviewMode ? (
+          <p
+            className="pointer-events-none absolute left-1/2 top-1/2 m-0 max-w-[360px] -translate-x-1/2 translate-y-[72px] text-center font-[var(--fc-font-ui)] text-[12px] text-[var(--fc-color-muted)]"
+            data-testid="directory-load-error"
+          >
+            {directoryLoadError}
+          </p>
+        ) : null}
+        {emptyChildGap && !isOverviewMode && !isExplorerSelectionActive ? (
           <button
             aria-label="Create child card"
             className="absolute w-[var(--fc-card-width)] cursor-pointer appearance-none border-0 bg-transparent p-0 transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
@@ -1108,7 +2470,7 @@ export function DocumentWorkspace({
             ))}
           </svg>
         ) : null}
-        {positionedCards.map((card) => {
+        {shouldShowDocumentTree ? positionedCards.map((card) => {
           if (
             uiPreferences.neighborCards === "hidden" &&
             !isOverviewMode &&
@@ -1117,7 +2479,7 @@ export function DocumentWorkspace({
             return null;
           }
 
-          const displayX = card.x + stageOffset.x;
+          const displayX = card.x + cardColumnShift + stageOffset.x;
           const displayY = card.y + stageOffset.y;
           const activeCardOverflowsViewport =
             !isOverviewMode &&
@@ -1136,6 +2498,7 @@ export function DocumentWorkspace({
           return (
                 !isOverviewMode &&
                 card.isActive &&
+                !isExplorerSelectionActive &&
                 selectedCard &&
                 selectedCardContent ? (
                   <div
@@ -1400,7 +2763,7 @@ export function DocumentWorkspace({
                         ? "empty card"
                         : ""
                     }
-                    isActive={card.isActive}
+                    isActive={card.isActive && !isExplorerSelectionActive}
                     minHeight={isOverviewMode ? OVERVIEW_CARD_HEIGHT : undefined}
                     key={card.cardId}
                     onMeasureHeight={(height) => {
@@ -1411,6 +2774,7 @@ export function DocumentWorkspace({
                       updateCardHeight(card.cardId, height, true);
                     }}
                     onClick={() => {
+                      preserveDocumentTreeExplorerContext();
                       setActiveCardId(card.cardId);
                       setPendingEditorFocusPlacement(isOverviewMode ? null : "end");
                       setPendingEditorTextInput(null);
@@ -1425,8 +2789,61 @@ export function DocumentWorkspace({
                   />
                 )
               );
-            })}
+            }) : null}
       </div>
+      {pendingDeleteDocument ? (
+        <OverlayShell
+          onBackdropMouseDown={cancelDeleteDocument}
+          title="Delete Document"
+          widthClassName="max-w-[min(92vw,520px)]"
+        >
+          <div className="space-y-7">
+            <p className="font-[var(--fc-font-content)] text-[1.05rem] leading-7 text-[var(--fc-color-text)]">
+              Are you sure you want to delete "{pendingDeleteDocument.name}" and all of it's contents?
+            </p>
+            {documentDeleteError ? (
+              <p
+                className="font-[var(--fc-font-ui)] text-sm leading-6 text-red-600"
+                data-testid="delete-document-error"
+              >
+                {documentDeleteError}
+              </p>
+            ) : null}
+            <div className="flex justify-center gap-3">
+              <button
+                aria-pressed={selectedDeleteDocumentAction === "cancel"}
+                className={`min-w-[7.5rem] rounded-[var(--fc-radius-pill)] bg-[var(--fc-color-surface-strong)] px-5 py-2.5 font-[var(--fc-font-ui)] text-sm text-[var(--fc-color-text)] outline-none transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)] hover:-translate-y-[1px] ${
+                  selectedDeleteDocumentAction === "cancel"
+                    ? "shadow-[var(--fc-shadow-elevated)] ring-2 ring-[var(--fc-color-text)]"
+                    : "shadow-[var(--fc-shadow-soft)]"
+                }`}
+                data-testid="cancel-delete-document"
+                onClick={cancelDeleteDocument}
+                onFocus={() => setSelectedDeleteDocumentAction("cancel")}
+                ref={cancelDeleteButtonRef}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                aria-pressed={selectedDeleteDocumentAction === "delete"}
+                className={`min-w-[7.5rem] rounded-[var(--fc-radius-pill)] bg-[var(--fc-color-text)] px-5 py-2.5 font-[var(--fc-font-ui)] text-sm text-[var(--fc-color-on-dark)] outline-none transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)] hover:-translate-y-[1px] ${
+                  selectedDeleteDocumentAction === "delete"
+                    ? "shadow-[var(--fc-shadow-elevated)] ring-2 ring-[var(--fc-color-text)] ring-offset-2 ring-offset-[var(--fc-color-surface)]"
+                    : "shadow-[var(--fc-shadow-soft)]"
+                }`}
+                data-testid="confirm-delete-document"
+                onClick={() => void commitDeleteDocument()}
+                onFocus={() => setSelectedDeleteDocumentAction("delete")}
+                ref={confirmDeleteButtonRef}
+                type="button"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </OverlayShell>
+      ) : null}
     </section>
   );
 }

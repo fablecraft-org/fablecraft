@@ -68,11 +68,16 @@ This brief translates it into **buildable engineering instructions**.
 ### Storage Layer
 - SQLite schema
 - open/create `.fable`
+- list the active document's containing folder and arbitrary browsed folders while exposing only child folders and `.fable` files to the frontend
+- create the next available `Untitled.fable`, `Untitled 2.fable`, etc. in a selected folder through the same document repository used by normal document creation
+- rename `.fable` documents with filesystem validation, collision checks, app-state updates for the active document, and recent-path replacement in the frontend
+- delete selected `.fable` documents with filesystem validation after frontend confirmation
 - autosave
 
 ### Domain Layer
 - tree operations
 - single-plane content operations
+- card clipboard payload serialization, validation, subtree removal, and paste remapping
 - undo logic
 
 ### UI State
@@ -88,6 +93,7 @@ This brief translates it into **buildable engineering instructions**.
 - sideways tree
 - centering logic
 - bounded stage-style workspace
+- folder and `.fable` document context cards render as non-persisted stage nodes that use the same selected-node centering and column movement model as writing cards; selected explorer nodes keep same-level folder/FABLE siblings visible in their vertical column, folder and FABLE explorer cards use half-width explorer metrics, and FABLE labels hide the `.fable` extension
 - full-tree rendering with overflow-hidden clipping
 - transient Cmd/Ctrl zoom shortcut overview state that uses a separate structural tree layout with compact title-only card shells, fixed scaling, and connector lines
 - fixed viewport with no scrollbars
@@ -164,6 +170,8 @@ animation: ~140ms ease-in-out
 - keyboard navigation
 - edit mode
 - undo
+- navigation-mode card cut/copy/paste
+- root-level left navigation enters document/folder context; folder context supports folder/file traversal without invoking card edit or structure operations
 
 ### Phase 4 — Layout
 - centered card
@@ -195,6 +203,17 @@ animation: ~140ms ease-in-out
 - startup import creates a new `.fable` document and seeds the root card from Markdown
 - export writes Markdown or HTML for the currently selected level
 - export save dialogs default to the document name
+
+### Phase 7.5 — Folder Context
+- add Tauri commands for listing a Fable-aware directory view and creating an untitled `.fable` in a selected directory
+- add a Tauri command for renaming `.fable` documents; it appends `.fable` automatically, rejects empty names, path separators, non-`.fable` paths, and existing target files
+- add a Tauri command for deleting `.fable` documents; it rejects folders, non-`.fable` paths, and missing files, and is only called after a frontend confirmation dialog
+- show the active document's containing folder and current `.fable` file as distinct non-card nodes to the left of the root-card column, with `FOLDER` / `FABLE` labels
+- keep only the current `.fable` file node visible while the selected node is a real document card entered from the current-document node; when the card tree is entered from a folder preview, keep the selected folder and same-level folder/FABLE sibling column visible beside the document tree
+- when a folder node is selected, hide the document card tree, keep its parent folder visible to the left when available, and show only child folders plus `.fable` files in the adjacent column
+- when a child folder entry is selected, load that folder as a preview directory and render its folders plus `.fable` files in the next column to the right
+- preview directory entries must be selectable navigation targets so Right moves one explorer level at a time before entering the real document card tree
+- opening a visible `.fable` file uses the existing document open flow; creating a folder-level document uses the existing document create repository path; renaming the active document updates app state, the frontend snapshot summary path, and recent document storage
 
 ### Phase 8 — MCP
 - server scaffold
@@ -230,11 +249,26 @@ animation: ~140ms ease-in-out
 - arrows navigate correctly
 - up/down move within the packed spatial column
 - left/right change depth only
+- Left from a root card selects the current `.fable` document context card, and Left again selects its containing folder.
+- Folder context shows only child folders and `.fable` files; non-`.fable` files are hidden.
+- Up/Down in folder context moves through visible folder entries, Right enters folders or opens `.fable` files, and Enter renames selected `.fable` files.
+- Ctrl/Cmd+Right on a folder context card creates the next available untitled `.fable` document in that folder.
+- Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Are you sure you want to delete "[file name]" and all of it's contents?` before deleting the `.fable` file and all of its contents from disk.
+- the delete confirmation dialog omits warning/footer helper copy, centers rounded-pill Cancel and Delete actions, lets arrow keys move the highlighted selection between actions, and activates the highlighted action with Enter
+- confirming deletion of the currently open `.fable` file closes the active document and returns to startup
+- shuffle, merge, indent, outdent, and text-entry commands do not mutate folder or `.fable` document context cards; FABLE document renaming and confirmed FABLE deletion are the only filename mutations in folder context.
 - typing any printable character enters edit mode and forwards that character into the editor
 - Tab+ArrowUp / Down / Right / Left create siblings, children, and wrapped parents in navigation mode
 - Shift+Up / Down moves within the packed column, can reorder root cards, and may reparent a card when crossing into a neighboring parent group
 - Shift+Right indents the active card under the sibling above as its last child
 - Option+Up / Down merges the active card with the sibling above or below while preserving the active card id
+- Cmd/Ctrl+C in navigation mode copies only the active writing card's content and does not create a document history entry
+- Cmd/Ctrl+X in navigation mode serializes the active writing card plus descendants, removes that subtree immediately, and records one navigation history entry
+- cutting the final remaining root card clears the root and removes descendants instead of deleting the final card
+- Cmd/Ctrl+V in navigation mode pastes only valid Fablecraft card clipboard payloads into an empty leaf writing card
+- pasted subtrees map the payload root onto the existing empty target card, recreate descendants with fresh ids, and set all pasted card `documentId` values to the active document
+- card clipboard payloads can be pasted across `.fable` documents, with undo/redo remaining local to each document's history
+- card clipboard commands do not mutate folder or `.fable` explorer context cards, and editing mode preserves normal text clipboard behavior
 - no invalid moves
 - empty cards cannot spawn new cards
 - newly created cards use an empty level-one heading document without an editor-appended trailing paragraph
@@ -359,7 +393,7 @@ animation: ~140ms ease-in-out
 - browser builds never invoke updater or process plugin behavior
 
 ### MCP
-- `get_open_documents` returns all document paths currently advertised by running app instances
+- `get_open_documents` returns live `.fable` document paths currently advertised by running app instances and prunes stale session entries for files that no longer exist
 - `get_document` returns structured JSON for the active document plane, including `treeDepthCounts`
 - `get_card` returns structured JSON for the active document plane, including ordered direct `childCardIds`
 - `get_subtree` returns structured JSON for the active document plane

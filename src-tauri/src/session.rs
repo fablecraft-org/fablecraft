@@ -65,13 +65,15 @@ pub fn read_open_document_sessions() -> AppResult<OpenDocumentSessionFile> {
 
     let contents = fs::read_to_string(&path).map_err(AppError::from)?;
 
-    serde_json::from_str(&contents).map_err(|error| {
+    let session_file = serde_json::from_str(&contents).map_err(|error| {
         AppError::storage(
             "open_document_session_parse_failed",
             "Fablecraft could not parse the open document session file.",
             Some(error.to_string()),
         )
-    })
+    })?;
+
+    Ok(prune_missing_document_sessions(session_file))
 }
 
 fn write_open_document_sessions(session_file: &OpenDocumentSessionFile) -> AppResult<()> {
@@ -92,4 +94,78 @@ fn current_time_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+fn prune_missing_document_sessions(
+    mut session_file: OpenDocumentSessionFile,
+) -> OpenDocumentSessionFile {
+    session_file
+        .open_documents
+        .retain(|session| is_existing_fable_document(&session.document_path));
+    session_file
+}
+
+fn is_existing_fable_document(path: &str) -> bool {
+    let path = PathBuf::from(path);
+    let extension = path.extension().and_then(|value| value.to_str());
+
+    path.is_file() && matches!(extension, Some(value) if value.eq_ignore_ascii_case("fable"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        prune_missing_document_sessions, OpenDocumentSession, OpenDocumentSessionFile, MAIN_SLOT_ID,
+    };
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn pruning_sessions_drops_missing_document_paths() {
+        let existing_path = unique_temp_path("existing", "fable");
+        let missing_path = unique_temp_path("missing", "fable");
+        let non_fable_path = unique_temp_path("notes", "txt");
+
+        fs::write(&existing_path, b"").expect("test document should be writable");
+        fs::write(&non_fable_path, b"").expect("test text file should be writable");
+
+        let session_file = OpenDocumentSessionFile {
+            open_documents: vec![
+                test_session("existing", existing_path.to_string_lossy().as_ref()),
+                test_session("missing", missing_path.to_string_lossy().as_ref()),
+                test_session("text", non_fable_path.to_string_lossy().as_ref()),
+            ],
+            updated_at_ms: 123,
+        };
+
+        let pruned = prune_missing_document_sessions(session_file);
+
+        assert_eq!(pruned.open_documents.len(), 1);
+        assert_eq!(pruned.open_documents[0].document_id, "existing");
+        assert_eq!(pruned.updated_at_ms, 123);
+
+        fs::remove_file(existing_path).expect("test document should be removable");
+        fs::remove_file(non_fable_path).expect("test text file should be removable");
+    }
+
+    fn test_session(document_id: &str, document_path: &str) -> OpenDocumentSession {
+        OpenDocumentSession {
+            document_id: document_id.to_string(),
+            document_path: document_path.to_string(),
+            process_id: 1,
+            slot_id: MAIN_SLOT_ID.to_string(),
+            updated_at_ms: 123,
+        }
+    }
+
+    fn unique_temp_path(label: &str, extension: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+
+        std::env::temp_dir().join(format!(
+            "fablecraft-session-test-{label}-{nonce}.{extension}"
+        ))
+    }
 }

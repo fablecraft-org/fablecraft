@@ -188,10 +188,9 @@ fn scoped_request_fields(
 ) -> Result<(&'static str, Option<String>), String> {
     match name {
         TOOL_GET_OPEN_DOCUMENTS | TOOL_GET_DOCUMENT => Ok(("document", None)),
-        TOOL_GET_CARD | TOOL_SET_CARD_TEXT => Ok((
-            "card",
-            Some(extract_required_string(arguments, "cardId")?),
-        )),
+        TOOL_GET_CARD | TOOL_SET_CARD_TEXT => {
+            Ok(("card", Some(extract_required_string(arguments, "cardId")?)))
+        }
         TOOL_GET_SUBTREE => Ok((
             "subtree",
             Some(extract_required_string(arguments, "cardId")?),
@@ -204,15 +203,9 @@ fn scoped_request_fields(
             "card",
             Some(extract_required_string(arguments, "siblingCardId")?),
         )),
-        TOOL_MOVE_CARD => Ok((
-            "card",
-            Some(extract_required_string(arguments, "cardId")?),
-        )),
+        TOOL_MOVE_CARD => Ok(("card", Some(extract_required_string(arguments, "cardId")?))),
         TOOL_WRAP_LEVEL_IN_PARENT => Ok(("card", None)),
-        TOOL_DELETE_CARD => Ok((
-            "card",
-            Some(extract_required_string(arguments, "cardId")?),
-        )),
+        TOOL_DELETE_CARD => Ok(("card", Some(extract_required_string(arguments, "cardId")?))),
         _ => Err(format!("Tool \"{name}\" is not registered.")),
     }
 }

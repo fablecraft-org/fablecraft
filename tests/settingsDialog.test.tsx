@@ -39,9 +39,10 @@ describe("SettingsDialog", () => {
 
     expect(container.querySelectorAll("select")).toHaveLength(0);
     expect(container.querySelectorAll('section[data-testid^="setting-row-"]')).toHaveLength(
-      6,
+      7,
     );
     expect(container.textContent).toContain("Text Size");
+    expect(container.textContent).toContain("Trackpad Pan");
     expect(container.textContent).toContain("Light");
     expect(container.textContent).toContain("Dark");
     expect(

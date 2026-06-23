@@ -24,6 +24,7 @@ import {
   forgetRecentDocumentPath,
   readRecentDocumentPaths,
   rememberLastDocumentPath,
+  replaceRecentDocumentPath,
 } from "../storage/lastDocument";
 import { openDocumentAtPath } from "../storage/documents";
 import { forceSaveCurrentDocument } from "../storage/forceSave";
@@ -529,6 +530,58 @@ export function App() {
     }
   }
 
+  async function handleOpenDocumentPath(path: string) {
+    try {
+      await forceSaveCurrentDocument();
+      const document = await openDocumentAtPath(path);
+      setRecentDocumentPaths(rememberLastDocumentPath(document.path));
+      setDocument(document);
+      setMode("navigation");
+      setNotice(null);
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: noticeMessage(error, "Fablecraft could not open that document."),
+      });
+    }
+  }
+
+  function handleWorkspaceDocumentCreated(document: NonNullable<typeof activeDocument>) {
+    setRecentDocumentPaths(rememberLastDocumentPath(document.path));
+    setDocument(document);
+    setMode("editing");
+    setNotice({
+      tone: "info",
+      message: `Created "${document.name}".`,
+    });
+  }
+
+  function handleWorkspaceDocumentRenamed(
+    document: NonNullable<typeof activeDocument>,
+    previousPath: string,
+  ) {
+    setRecentDocumentPaths(replaceRecentDocumentPath(previousPath, document.path));
+    setDocument(document);
+    setNotice({
+      tone: "info",
+      message: `Renamed document to "${document.name}".`,
+    });
+  }
+
+  function handleWorkspaceDocumentDeleted(path: string) {
+    const nextRecentDocumentPaths = forgetRecentDocumentPath(path);
+    setRecentDocumentPaths(nextRecentDocumentPaths);
+    if (nextRecentDocumentPaths.length === 0) {
+      clearLastDocumentPath();
+    }
+    setDocument(null);
+    setMode("navigation");
+    setNotice({
+      tone: "info",
+      message: "Deleted document.",
+    });
+  }
+
   async function handleImportMarkdown() {
     try {
       await forceSaveCurrentDocument();
@@ -941,6 +994,10 @@ export function App() {
         {screen === "workspace" && activeDocument && (
           <DocumentWorkspace
             document={activeDocument}
+            onDocumentCreated={handleWorkspaceDocumentCreated}
+            onDocumentDeleted={handleWorkspaceDocumentDeleted}
+            onDocumentRenamed={handleWorkspaceDocumentRenamed}
+            onOpenDocumentPath={handleOpenDocumentPath}
             suspendKeyboard={Boolean(
               isSettingsOpen ||
                 helpSheetMode ||

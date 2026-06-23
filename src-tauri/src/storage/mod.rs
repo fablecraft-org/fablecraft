@@ -774,7 +774,11 @@ mod tests {
                     },
                 ],
                 contents: vec![
-                    snapshot.contents.first().expect("base content should exist").clone(),
+                    snapshot
+                        .contents
+                        .first()
+                        .expect("base content should exist")
+                        .clone(),
                     CardContentRecord {
                         card_id: child_card_id,
                         content_json: EMPTY_EDITOR_DOCUMENT.to_string(),
@@ -823,7 +827,11 @@ mod tests {
                     },
                 ],
                 contents: vec![
-                    snapshot.contents.first().expect("base content should exist").clone(),
+                    snapshot
+                        .contents
+                        .first()
+                        .expect("base content should exist")
+                        .clone(),
                     CardContentRecord {
                         card_id: second_root_id,
                         content_json: EMPTY_EDITOR_DOCUMENT.to_string(),

@@ -525,7 +525,12 @@ fn move_card(
         result_json,
         scope: request.scope,
         snapshot: None,
-        summary: format!("Moved card {} {} {}.", card_id, placement.as_str(), target_card_id),
+        summary: format!(
+            "Moved card {} {} {}.",
+            card_id,
+            placement.as_str(),
+            target_card_id
+        ),
         tool_name: request.tool_name,
     })
 }

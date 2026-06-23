@@ -4,6 +4,7 @@ import {
   readLastDocumentPath,
   readRecentDocumentPaths,
   rememberLastDocumentPath,
+  replaceRecentDocumentPath,
 } from "../src/storage/lastDocument";
 
 describe("lastDocument storage", () => {
@@ -36,6 +37,17 @@ describe("lastDocument storage", () => {
 
     expect(forgetRecentDocumentPath("/tmp/two.fable")).toEqual(["/tmp/one.fable"]);
     expect(readLastDocumentPath()).toBe("/tmp/one.fable");
+  });
+
+  it("replaces a renamed recent document path in place", () => {
+    rememberLastDocumentPath("/tmp/one.fable");
+    rememberLastDocumentPath("/tmp/two.fable");
+
+    expect(replaceRecentDocumentPath("/tmp/two.fable", "/tmp/renamed.fable")).toEqual([
+      "/tmp/renamed.fable",
+      "/tmp/one.fable",
+    ]);
+    expect(readLastDocumentPath()).toBe("/tmp/renamed.fable");
   });
 
   it("clears the stored document path", () => {

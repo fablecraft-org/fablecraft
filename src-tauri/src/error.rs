@@ -62,7 +62,11 @@ impl AppError {
         }
     }
 
-    pub fn storage(code: &'static str, message: impl Into<String>, details: Option<String>) -> Self {
+    pub fn storage(
+        code: &'static str,
+        message: impl Into<String>,
+        details: Option<String>,
+    ) -> Self {
         Self::Storage {
             code,
             message: message.into(),
@@ -127,4 +131,3 @@ impl From<std::io::Error> for AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
-

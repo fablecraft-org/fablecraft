@@ -64,6 +64,23 @@ export function forgetRecentDocumentPath(path: string) {
   return nextRecentPaths;
 }
 
+export function replaceRecentDocumentPath(previousPath: string, nextPath: string) {
+  const nextRecentPaths = readRecentDocumentPaths()
+    .map((entry) => entry === previousPath ? nextPath : entry)
+    .filter((entry, index, entries) => entries.indexOf(entry) === index)
+    .slice(0, MAX_RECENT_DOCUMENTS);
+
+  if (nextRecentPaths.length > 0) {
+    window.localStorage.setItem(RECENT_DOCUMENT_STORAGE_KEY, JSON.stringify(nextRecentPaths));
+    window.localStorage.setItem(LAST_DOCUMENT_STORAGE_KEY, nextRecentPaths[0]!);
+  } else {
+    window.localStorage.removeItem(RECENT_DOCUMENT_STORAGE_KEY);
+    window.localStorage.removeItem(LAST_DOCUMENT_STORAGE_KEY);
+  }
+
+  return nextRecentPaths;
+}
+
 export function clearLastDocumentPath() {
   window.localStorage.removeItem(RECENT_DOCUMENT_STORAGE_KEY);
   window.localStorage.removeItem(LAST_DOCUMENT_STORAGE_KEY);

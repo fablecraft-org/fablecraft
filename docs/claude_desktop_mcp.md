@@ -50,7 +50,7 @@ The Claude MCP server operates on explicit `.fable` paths. Tool calls should pas
 
 - `/Users/callum/Documents/story.fable`
 
-If the desktop app has opened or created a document in the current OS session, `fablecraft_get_open_documents` can discover the active path list from Fablecraft's local session file. The response may include more than one path when multiple app instances, windows, or future tabs advertise different documents.
+If the desktop app has opened or created a document in the current OS session, `fablecraft_get_open_documents` can discover the active path list from Fablecraft's local session file. The response may include more than one path when multiple app instances, windows, or future tabs advertise different documents. Stale session entries for missing or non-`.fable` files are ignored.
 
 Recommended sequence inside Claude:
 
@@ -77,6 +77,8 @@ Mutation tools:
 - `fablecraft_move_card`
 - `fablecraft_wrap_level_in_parent`
 - `fablecraft_delete_card`
+
+The MCP server exposes document and card-plane tools only. Folder-context file operations such as deleting a `.fable` document remain desktop UI actions guarded by the app confirmation dialog.
 
 `fablecraft_get_document` returns `treeDepthCounts`, where `[1, 4, 7, 32]` means the root depth has 1 card, the next depth has 4 cards, and so on. `fablecraft_get_card` returns ordered direct `childCardIds`. Mutation tools return lightweight status payloads rather than full document snapshots.
 
