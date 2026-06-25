@@ -387,6 +387,38 @@ function packColumn(
   return packedCenters;
 }
 
+function setStackedChildDesiredCenters(
+  childCards: CardRecord[],
+  parentCardId: string,
+  parentCenter: number,
+  desiredCenters: Map<string, number>,
+  spacing: number,
+  heightForCardId: (cardId: string) => number,
+) {
+  const firstChild = childCards[0];
+  const firstChildCenter = firstChild
+    ? parentCenter - heightForCardId(parentCardId) / 2 + heightForCardId(firstChild.id) / 2
+    : parentCenter;
+
+  childCards.forEach((child, index) => {
+    if (index === 0) {
+      desiredCenters.set(child.id, firstChildCenter);
+      return;
+    }
+
+    const previousChild = childCards[index - 1]!;
+    const previousCenter = desiredCenters.get(previousChild.id) ?? firstChildCenter;
+
+    desiredCenters.set(
+      child.id,
+      previousCenter +
+        heightForCardId(previousChild.id) / 2 +
+        spacing +
+        heightForCardId(child.id) / 2,
+    );
+  });
+}
+
 function repackColumnAroundAnchor(
   cards: CardRecord[],
   columnCards: SpatialCardPosition[],
@@ -565,20 +597,14 @@ export function stageLayout(
         return;
       }
 
-      const groupHeight = childCards.reduce(
-        (sum, child, index) =>
-          sum +
-          heightForCardId(child.id) +
-          (index > 0 ? options.spacing : 0),
-        0,
+      setStackedChildDesiredCenters(
+        childCards,
+        parentPosition.cardId,
+        parentY,
+        desiredCenters,
+        options.spacing,
+        heightForCardId,
       );
-      let cursor = parentY - groupHeight / 2;
-
-      childCards.forEach((child) => {
-        const height = heightForCardId(child.id);
-        desiredCenters.set(child.id, cursor + height / 2);
-        cursor += height + options.spacing;
-      });
     });
 
     packColumn(
@@ -625,20 +651,14 @@ export function stageLayout(
           return;
         }
 
-        const groupHeight = childCards.reduce(
-          (sum, child, index) =>
-            sum +
-            heightForCardId(child.id) +
-            (index > 0 ? options.spacing : 0),
-          0,
+        setStackedChildDesiredCenters(
+          childCards,
+          parentPosition.cardId,
+          parentY,
+          desiredCenters,
+          options.spacing,
+          heightForCardId,
         );
-        let cursor = parentY - groupHeight / 2;
-
-        childCards.forEach((child) => {
-          const height = heightForCardId(child.id);
-          desiredCenters.set(child.id, cursor + height / 2);
-          cursor += height + options.spacing;
-        });
       });
     }
 
@@ -728,10 +748,13 @@ export function stageLayout(
         const currentHeight = heightForCardId(currentCardId);
         const nextHeight = heightForCardId(nextCardId);
         const nextCenter = nextCenters.get(nextCardId) ?? 0;
+        const desiredCenter = yByCard.get(currentCardId) ?? 0;
+        const latestNonOverlappingCenter =
+          nextCenter - nextHeight / 2 - options.spacing - currentHeight / 2;
 
         nextCenters.set(
           currentCardId,
-          nextCenter - nextHeight / 2 - options.spacing - currentHeight / 2,
+          Math.min(desiredCenter, latestNonOverlappingCenter),
         );
       }
 
@@ -745,13 +768,13 @@ export function stageLayout(
         const currentHeight = heightForCardId(currentCardId);
         const previousHeight = heightForCardId(previousCardId);
         const previousCenter = nextCenters.get(previousCardId) ?? 0;
+        const desiredCenter = yByCard.get(currentCardId) ?? 0;
+        const earliestNonOverlappingCenter =
+          previousCenter + previousHeight / 2 + options.spacing + currentHeight / 2;
 
         nextCenters.set(
           currentCardId,
-          previousCenter +
-            previousHeight / 2 +
-            options.spacing +
-            currentHeight / 2,
+          Math.max(desiredCenter, earliestNonOverlappingCenter),
         );
       }
 
@@ -787,10 +810,13 @@ export function stageLayout(
           ? heightForCardId(nextCardId)
           : emptyChildGapHeight;
         const nextCenter = nextCardId ? (nextCenters.get(nextCardId) ?? 0) : 0;
+        const desiredCenter = yByCard.get(currentCardId) ?? 0;
+        const latestNonOverlappingCenter =
+          nextCenter - nextHeight / 2 - options.spacing - currentHeight / 2;
 
         nextCenters.set(
           currentCardId,
-          nextCenter - nextHeight / 2 - options.spacing - currentHeight / 2,
+          Math.min(desiredCenter, latestNonOverlappingCenter),
         );
       }
 
@@ -807,10 +833,13 @@ export function stageLayout(
         const previousCenter = previousCardId
           ? (nextCenters.get(previousCardId) ?? 0)
           : 0;
+        const desiredCenter = yByCard.get(currentCardId) ?? 0;
+        const earliestNonOverlappingCenter =
+          previousCenter + previousHeight / 2 + options.spacing + currentHeight / 2;
 
         nextCenters.set(
           currentCardId,
-          previousCenter + previousHeight / 2 + options.spacing + currentHeight / 2,
+          Math.max(desiredCenter, earliestNonOverlappingCenter),
         );
       }
 

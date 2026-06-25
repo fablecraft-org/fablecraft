@@ -251,6 +251,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - dark theme card number labels use a light token so labels such as `A01` remain visible
 - immediate parent aligns vertically with the active card
 - the first immediate child is vertically centered on the active card, and later children stack below it even when other child groups share that column
+- first children of other visible parent groups in the same child column stay as close as possible to the parent's visible top-aligned child slot whenever they can do so without overlapping the active child group or reserved empty child slot, with later children stacked directly below that first child
 - anchoring the active child group must not reorder neighboring sibling subtrees in that same child column
 - when the active card has no children, the child column still reserves a full empty slot centered on the active card so neighboring sibling subtrees cannot visually read as its children
 - that empty child slot matches the selected card footprint but stays visually invisible against the workspace background while remaining clickable for first-child creation

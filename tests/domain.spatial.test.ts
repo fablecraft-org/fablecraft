@@ -288,6 +288,118 @@ describe("document spatial helpers", () => {
     expect(positioned.find((card) => card.cardId === "card-b-1")?.y).toBeGreaterThanOrEqual(324);
   });
 
+  it("keeps unrelated first children aligned with their own lower parent when clear of the active child", () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      {
+        documentId: "doc-1",
+        id: "card-c",
+        orderIndex: 2,
+        parentId: "card-root",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-d",
+        orderIndex: 3,
+        parentId: "card-root",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-a-1",
+        orderIndex: 0,
+        parentId: "card-a",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-d-1",
+        orderIndex: 0,
+        parentId: "card-d",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-d-2",
+        orderIndex: 1,
+        parentId: "card-d",
+        type: "card",
+      },
+    );
+
+    const positioned = stageLayout(snapshot.cards, "card-a", {
+      cardHeight: 84,
+      cardWidth: 468,
+      spacing: 24,
+    }).cards;
+    const activeChild = positioned.find((card) => card.cardId === "card-a-1")!;
+    const lowerParent = positioned.find((card) => card.cardId === "card-d")!;
+    const lowerParentChild = positioned.find((card) => card.cardId === "card-d-1")!;
+    const lowerParentSecondChild = positioned.find((card) => card.cardId === "card-d-2")!;
+
+    expect(activeChild.y).toBe(0);
+    expect(lowerParentChild.y).toBe(lowerParent.y);
+    expect(lowerParentSecondChild.y).toBe(lowerParentChild.y + 108);
+    expect(lowerParentChild.y).toBeGreaterThan(108);
+  });
+
+  it("keeps a lower child group near the top of a tall parent instead of centered in the parent gap", () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      {
+        documentId: "doc-1",
+        id: "card-c",
+        orderIndex: 2,
+        parentId: "card-root",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-d",
+        orderIndex: 3,
+        parentId: "card-root",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-a-1",
+        orderIndex: 0,
+        parentId: "card-a",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-d-1",
+        orderIndex: 0,
+        parentId: "card-d",
+        type: "card",
+      },
+      {
+        documentId: "doc-1",
+        id: "card-d-2",
+        orderIndex: 1,
+        parentId: "card-d",
+        type: "card",
+      },
+    );
+
+    const positioned = stageLayout(snapshot.cards, "card-a", {
+      cardHeight: 84,
+      cardHeights: {
+        "card-d": 324,
+      },
+      cardWidth: 468,
+      spacing: 24,
+    }).cards;
+    const lowerParent = positioned.find((card) => card.cardId === "card-d")!;
+    const lowerParentChild = positioned.find((card) => card.cardId === "card-d-1")!;
+    const lowerParentSecondChild = positioned.find((card) => card.cardId === "card-d-2")!;
+
+    expect(lowerParentChild.y).toBe(lowerParent.y - 120);
+    expect(lowerParentSecondChild.y).toBe(lowerParentChild.y + 108);
+  });
+
   it("keeps a sibling-above child above the active child group after the active column repack", () => {
     const snapshot = makeDocumentSnapshot();
     snapshot.cards.push(
