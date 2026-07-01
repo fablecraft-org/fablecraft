@@ -18,16 +18,20 @@ use integrations::{
     enable_claude_desktop_integration, enable_codex_integration, load_local_integration_statuses,
 };
 use mcp::{invoke_mcp_tool, list_mcp_tools};
+#[cfg(target_os = "macos")]
 use tauri::{Emitter, Manager};
 
+#[cfg(target_os = "macos")]
 const OPEN_DOCUMENTS_EVENT: &str = "fablecraft://open-documents";
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenDocumentsPayload {
     paths: Vec<String>,
 }
 
+#[cfg(target_os = "macos")]
 fn handle_open_document_paths(app: &tauri::AppHandle, paths: Vec<String>) {
     if paths.is_empty() {
         return;
@@ -83,19 +87,27 @@ pub fn run() {
         .expect("error while building Fablecraft");
 
     app.run(|app_handle, event| {
-        if let tauri::RunEvent::Opened { urls } = event {
-            let paths = urls
-                .into_iter()
-                .filter_map(|url| url.to_file_path().ok())
-                .filter(|path| {
-                    path.extension()
-                        .and_then(|extension| extension.to_str())
-                        .is_some_and(|extension| extension.eq_ignore_ascii_case("fable"))
-                })
-                .map(|path| path.to_string_lossy().to_string())
-                .collect();
+        #[cfg(target_os = "macos")]
+        {
+            if let tauri::RunEvent::Opened { urls } = event {
+                let paths = urls
+                    .into_iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .filter(|path| {
+                        path.extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("fable"))
+                    })
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect();
 
-            handle_open_document_paths(app_handle, paths);
+                handle_open_document_paths(app_handle, paths);
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (app_handle, event);
         }
     });
 }
