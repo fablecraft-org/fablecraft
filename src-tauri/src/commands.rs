@@ -107,6 +107,20 @@ pub fn open_document(
 }
 
 #[tauri::command]
+pub fn take_pending_open_document_paths(
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, AppErrorPayload> {
+    let mut paths = state.pending_open_document_paths.lock().map_err(|_| {
+        AppError::storage(
+            "pending_open_documents_lock_failed",
+            "Fablecraft could not read pending document open requests.",
+            None,
+        )
+    })?;
+    Ok(std::mem::take(&mut *paths))
+}
+
+#[tauri::command]
 pub fn list_current_document_directory(
     state: State<'_, AppState>,
 ) -> Result<FableDirectory, AppErrorPayload> {

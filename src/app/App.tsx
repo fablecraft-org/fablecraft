@@ -20,6 +20,10 @@ import {
 } from "../lib/nativeMenu";
 import { syncNativeWindowAppearance } from "../lib/nativeWindowAppearance";
 import {
+  listenForNativeOpenDocuments,
+  takePendingOpenDocumentPaths,
+} from "../lib/openDocuments";
+import {
   clearLastDocumentPath,
   forgetRecentDocumentPath,
   readRecentDocumentPaths,
@@ -93,6 +97,7 @@ export function App() {
   const [showBetaBar, setShowBetaBar] = useState(true);
   const [recentDocumentPaths, setRecentDocumentPaths] = useState<string[]>([]);
   const nativeMenuActionHandlerRef = useRef<(action: NativeMenuAction) => void>(() => {});
+  const openDocumentPathHandlerRef = useRef<(path: string) => void>(() => {});
   const openDocumentPromptInFlightRef = useRef(false);
   const updateCheckInFlightRef = useRef(false);
   const startupUpdateCheckStartedRef = useRef(false);
@@ -546,6 +551,10 @@ export function App() {
     }
   }
 
+  openDocumentPathHandlerRef.current = (path) => {
+    void handleOpenDocumentPath(path);
+  };
+
   function handleWorkspaceDocumentCreated(document: NonNullable<typeof activeDocument>) {
     setRecentDocumentPaths(rememberLastDocumentPath(document.path));
     setDocument(document);
@@ -815,6 +824,45 @@ export function App() {
     }
 
     void attachNativeMenuListener();
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+
+    function openFirstDocumentPath(paths: string[]) {
+      const path = paths.find((entry) => entry.toLowerCase().endsWith(".fable"));
+
+      if (path) {
+        openDocumentPathHandlerRef.current(path);
+      }
+    }
+
+    async function drainPendingOpenDocumentPaths() {
+      openFirstDocumentPath(await takePendingOpenDocumentPaths());
+    }
+
+    async function attachNativeOpenDocumentListener() {
+      const cleanup = await listenForNativeOpenDocuments((paths) => {
+        openFirstDocumentPath(paths);
+        void takePendingOpenDocumentPaths();
+      });
+
+      if (disposed) {
+        cleanup();
+        return;
+      }
+
+      unlisten = cleanup;
+      void drainPendingOpenDocumentPaths();
+    }
+
+    void attachNativeOpenDocumentListener();
 
     return () => {
       disposed = true;

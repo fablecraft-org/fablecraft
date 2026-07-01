@@ -28,6 +28,7 @@ The product is:
 - primary writing surface
 - local-first
 - opens and edits `.fable` documents
+- registered with macOS as the owner/editor for `.fable` documents so Finder can open them directly in Fablecraft
 - usable without any account
 - checks for signed desktop updates from the published release channel and prompts before installing
 

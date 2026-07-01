@@ -11,4 +11,5 @@ pub struct OpenDocumentContext {
 #[derive(Default)]
 pub struct AppState {
     pub current_document: Mutex<Option<OpenDocumentContext>>,
+    pub pending_open_document_paths: Mutex<Vec<String>>,
 }

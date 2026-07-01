@@ -3,7 +3,12 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/app/App";
 import { useAppStore } from "../src/state/appStore";
-import { FRONTEND_MENU_ACTION_EVENT, type NativeMenuAction } from "../src/lib/nativeMenu";
+import {
+  FRONTEND_MENU_ACTION_EVENT,
+  NATIVE_MENU_ACTION_EVENT,
+  type NativeMenuAction,
+} from "../src/lib/nativeMenu";
+import { OPEN_DOCUMENTS_EVENT } from "../src/lib/openDocuments";
 
 const mocks = vi.hoisted(() => ({
   enableClaudeDesktopIntegration: vi.fn(),
@@ -19,6 +24,9 @@ const mocks = vi.hoisted(() => ({
 
 let nativeMenuCallback:
   | ((event: { payload: { action: NativeMenuAction } }) => void)
+  | null = null;
+let nativeOpenDocumentCallback:
+  | ((event: { payload: { paths: string[] } }) => void)
   | null = null;
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -68,6 +76,10 @@ function dispatchNativeMenuAction(action: NativeMenuAction) {
   nativeMenuCallback?.({ payload: { action } });
 }
 
+function dispatchNativeOpenDocuments(paths: string[]) {
+  nativeOpenDocumentCallback?.({ payload: { paths } });
+}
+
 function resetAppStore() {
   useAppStore.setState({
     activeDocument: null,
@@ -89,6 +101,7 @@ describe("App native menu handling", () => {
       }
     ).IS_REACT_ACT_ENVIRONMENT = true;
     nativeMenuCallback = null;
+    nativeOpenDocumentCallback = null;
     mocks.enableClaudeDesktopIntegration.mockReset();
     mocks.enableCodexIntegration.mockReset();
     mocks.forceSaveCurrentDocument.mockReset();
@@ -100,10 +113,22 @@ describe("App native menu handling", () => {
     mocks.unlisten.mockReset();
     mocks.listen.mockImplementation(
       async (
-        _eventName: string,
-        callback: (event: { payload: { action: NativeMenuAction } }) => void,
+        eventName: string,
+        callback:
+          | ((event: { payload: { action: NativeMenuAction } }) => void)
+          | ((event: { payload: { paths: string[] } }) => void),
       ) => {
-        nativeMenuCallback = callback;
+        if (eventName === NATIVE_MENU_ACTION_EVENT) {
+          nativeMenuCallback = callback as (event: {
+            payload: { action: NativeMenuAction };
+          }) => void;
+        }
+
+        if (eventName === OPEN_DOCUMENTS_EVENT) {
+          nativeOpenDocumentCallback = callback as (event: {
+            payload: { paths: string[] };
+          }) => void;
+        }
 
         return mocks.unlisten;
       },
@@ -160,7 +185,7 @@ describe("App native menu handling", () => {
       root.render(<App />);
     });
 
-    expect(mocks.listen).toHaveBeenCalledTimes(1);
+    expect(mocks.listen).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       dispatchNativeMenuAction("open-document");
@@ -170,7 +195,7 @@ describe("App native menu handling", () => {
       mocks.forceSaveCurrentDocument.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.promptForOpenDocument.mock.invocationCallOrder[0]);
     expect(useAppStore.getState().screen).toBe("workspace");
-    expect(mocks.listen).toHaveBeenCalledTimes(1);
+    expect(mocks.listen).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       root.unmount();
@@ -201,6 +226,30 @@ describe("App native menu handling", () => {
       mocks.forceSaveCurrentDocument.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.promptForNewDocument.mock.invocationCallOrder[0]);
     expect(useAppStore.getState().activeDocument?.documentId).toBe("doc-2");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens a .fable document from a native open-file event", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    await act(async () => {
+      dispatchNativeOpenDocuments(["/tmp/notes.txt", "/tmp/finder-story.fable"]);
+    });
+
+    expect(
+      mocks.forceSaveCurrentDocument.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.openDocumentAtPath.mock.invocationCallOrder[0]);
+    expect(mocks.openDocumentAtPath).toHaveBeenCalledWith("/tmp/finder-story.fable");
+    expect(useAppStore.getState().activeDocument?.path).toBe("/tmp/finder-story.fable");
 
     await act(async () => {
       root.unmount();

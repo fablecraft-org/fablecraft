@@ -19,6 +19,7 @@ This brief translates it into **buildable engineering instructions**.
 - Vite
 - browser builds render the public website
 - Tauri builds render the desktop editor
+- Tauri bundle metadata registers `.fable` as a Fablecraft document type; macOS open-file events are buffered in Rust and forwarded to the frontend open-document flow
 - `npm run tutorial:sync` regenerates the website tutorial snapshot from `src/site/tutorial.fable`
 - Tauri updater calls live behind a desktop-only frontend service
 
@@ -33,6 +34,7 @@ This brief translates it into **buildable engineering instructions**.
 - Centralized UI tokens (spacing, colors, animation)
 - light mode uses a shared soft pink-white paper and dark-ink palette across the website and desktop app
 - desktop app icons live in `src-tauri/icons`, are generated from `branding/generated-icons/fablecraft-app-icon-rounded.png`, and must be listed in `src-tauri/tauri.conf.json` under `bundle.icon`; website favicon and web app manifest icons live in `public`
+- `.fable` file association metadata lives in `src-tauri/tauri.conf.json` under `bundle.fileAssociations` and must stay aligned with the single-file SQLite document format
 - dark mode uses neutral charcoal surfaces and cool gray contrast rather than warm brown tokens
 - shadows stay restrained so borders and spacing do most of the visual work
 - desktop cards and panels use only slight corner rounding and rely on shadow hierarchy instead of visible borders
@@ -203,6 +205,7 @@ animation: ~140ms ease-in-out
 - startup import creates a new `.fable` document and seeds the root card from Markdown
 - export writes Markdown or HTML for the currently selected level
 - export save dialogs default to the document name
+- Finder/open-with launches for `.fable` files enter the same save-before-open and recent-document path as explicit app opens
 
 ### Phase 7.5 — Folder Context
 - add Tauri commands for listing a Fable-aware directory view and creating an untitled `.fable` in a selected directory
@@ -230,6 +233,7 @@ animation: ~140ms ease-in-out
 - structured payload limits on tool args and responses
 - the workspace polls a lightweight document clock before loading a full `.fable` snapshot, and commits external changes when there are no unsaved local edits
 - MCP remains available as an external integration surface rather than an in-app command palette action
+- macOS Finder double-click/Open With on a `.fable` file opens that document in the desktop app, including cold-start delivery before the frontend listener attaches
 
 ### Phase 9 — Website
 - add a browser-only companion website inside the same frontend repo
