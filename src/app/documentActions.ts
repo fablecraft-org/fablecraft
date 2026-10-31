@@ -24,6 +24,20 @@ export async function promptForNewDocument() {
   return createDocumentAtPath(ensureFableExtension(selectedPath));
 }
 
+export async function promptForConvertedCardDocument(defaultPath = "untitled.fable") {
+  const selectedPath = await save({
+    title: "Convert Card to Document",
+    filters: DOCUMENT_FILTERS,
+    defaultPath,
+  });
+
+  if (!selectedPath) {
+    return null;
+  }
+
+  return createDocumentAtPath(ensureFableExtension(selectedPath));
+}
+
 export async function promptForOpenDocument() {
   const selectedPath = await open({
     title: "Open Fablecraft document",

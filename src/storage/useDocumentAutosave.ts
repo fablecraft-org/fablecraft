@@ -15,6 +15,7 @@ export function useDocumentAutosave() {
       return;
     }
 
+    let cancelled = false;
     const timeoutId = window.setTimeout(async () => {
       try {
         markSaving();
@@ -22,8 +23,9 @@ export function useDocumentAutosave() {
           snapshot.summary.path,
           toEditableDocumentSnapshot(snapshot),
         );
-        markSaved(result, snapshot.summary.documentId);
+        if (!cancelled) markSaved(result, snapshot.summary.documentId);
       } catch (error) {
+        if (cancelled) return;
         markSaveError(
           error instanceof Error ? error.message : "Autosave failed unexpectedly.",
         );
@@ -31,6 +33,7 @@ export function useDocumentAutosave() {
     }, 450);
 
     return () => {
+      cancelled = true;
       window.clearTimeout(timeoutId);
     };
   }, [dirty, markSaveError, markSaved, markSaving, snapshot]);

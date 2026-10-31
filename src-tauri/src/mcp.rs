@@ -13,9 +13,8 @@ use crate::storage::{
     CardContentRecord, DocumentRepository, DocumentSnapshot, EditableDocumentSnapshot,
 };
 
-const NEW_CARD_EDITOR_DOCUMENT: &str =
-    r#"{"type":"doc","content":[{"type":"heading","attrs":{"level":1}}]}"#;
 const EMPTY_EDITOR_DOCUMENT: &str = r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
+const NEW_CARD_EDITOR_DOCUMENT: &str = EMPTY_EDITOR_DOCUMENT;
 const MAX_MCP_ARGUMENT_BYTES: usize = 16 * 1024;
 const MAX_MCP_PAYLOAD_BYTES: usize = 128 * 1024;
 const TOOL_GET_OPEN_DOCUMENTS: &str = "fablecraft_get_open_documents";
@@ -1975,7 +1974,7 @@ mod tests {
 
         assert!(response.snapshot.is_none());
         assert_eq!(child_count, 1);
-        assert_eq!(child_content_json, NEW_CARD_EDITOR_DOCUMENT);
+        assert_eq!(child_content_json, EMPTY_EDITOR_DOCUMENT);
 
         fs::remove_file(path).expect("temp file should be removable");
     }
@@ -2024,7 +2023,7 @@ mod tests {
 
         assert!(response.snapshot.is_none());
         assert_eq!(child_ids, vec![created_id.to_string(), first_child_id]);
-        assert_eq!(created_content_json, NEW_CARD_EDITOR_DOCUMENT);
+        assert_eq!(created_content_json, EMPTY_EDITOR_DOCUMENT);
 
         fs::remove_file(path).expect("temp file should be removable");
     }

@@ -110,11 +110,10 @@ function SettingGroup<T extends string>({
         <div className="flex items-center gap-2">
           <span
             aria-hidden="true"
-            className="inline-flex w-3 justify-center font-[var(--fc-font-ui)] text-xs font-semibold text-[var(--fc-color-text)] transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
+            className="inline-flex w-3 justify-center font-[var(--fc-font-ui)] text-xs font-semibold text-[var(--fc-color-text)]"
             data-testid={`setting-row-${id}-chevron`}
-            style={{ opacity: active ? 1 : 0 }}
           >
-            &gt;
+            {active ? ">" : null}
           </span>
           <div
             className="font-[var(--fc-font-ui)] text-xs uppercase tracking-[0.18em] text-[var(--fc-color-muted)]"

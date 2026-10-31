@@ -73,7 +73,7 @@ This brief translates it into **buildable engineering instructions**.
 - list the active document's containing folder and arbitrary browsed folders while exposing only child folders and `.fable` files to the frontend
 - create the next available `Untitled.fable`, `Untitled 2.fable`, etc. in a selected folder through the same document repository used by normal document creation
 - rename `.fable` documents with filesystem validation, collision checks, app-state updates for the active document, and recent-path replacement in the frontend
-- delete selected `.fable` documents with filesystem validation after frontend confirmation
+- move selected `.fable` documents to system Trash with filesystem validation after frontend confirmation
 - autosave
 
 ### Domain Layer
@@ -214,6 +214,7 @@ animation: ~140ms ease-in-out
 - show the active document's containing folder and current `.fable` file as distinct non-card nodes to the left of the root-card column, with `FOLDER` / `FABLE` labels
 - keep only the current `.fable` file node visible while the selected node is a real document card entered from the current-document node; when the card tree is entered from a folder preview, keep the selected folder and same-level folder/FABLE sibling column visible beside the document tree
 - when a folder node is selected, hide the document card tree, keep its parent folder visible to the left when available, and show only child folders plus `.fable` files in the adjacent column
+- selected folder nodes load their parent directory through `listFableDirectory` and render its visible entries around the active folder in the same column; cancel stale parent-listing results when folder/selection changes, exclude locally deleted paths, and support same-level Up/Down and click navigation while keeping child entries to the right
 - when a child folder entry is selected, load that folder as a preview directory and render its folders plus `.fable` files in the next column to the right
 - preview directory entries must be selectable navigation targets so Right moves one explorer level at a time before entering the real document card tree
 - opening a visible `.fable` file uses the existing document open flow; creating a folder-level document uses the existing document create repository path; renaming the active document updates app state, the frontend snapshot summary path, and recent document storage
@@ -252,13 +253,14 @@ animation: ~140ms ease-in-out
 ### Navigation
 - arrows navigate correctly
 - up/down move within the packed spatial column
-- left/right change depth only
+- left/right change depth only; Left records the child being left in `interactionStore.rememberedChildIds`, and Right uses the validated remembered direct child or the first child. Explorer navigation uses the same transient map with `folder:<path>` keys for last selected folder/file entries and `document:<path>` keys for last selected root cards. Folder and preview child columns align the remembered visible entry with their parent; invalid or deleted paths fall back to the first visible entry. Left/Right round trips work across document/root, folder/file, nested previews, and parent folder boundaries. Successful vertical card or explorer navigation clears the memory; switching documents also clears it. This is transient interaction state, excluded from snapshots, autosave, and undo history. Deleted or reparented remembered targets fall back to the first child.
 - Left from a root card selects the current `.fable` document context card, and Left again selects its containing folder.
 - Folder context shows only child folders and `.fable` files; non-`.fable` files are hidden.
+- The shared Rust directory-listing helper excludes dot-prefixed child directories before returning entries, applying the same visibility rule to folder context and nested previews; dots elsewhere in folder names remain visible.
 - Up/Down in folder context moves through visible folder entries, Right enters folders or opens `.fable` files, and Enter renames selected `.fable` files.
 - Ctrl/Cmd+Right on a folder context card creates the next available untitled `.fable` document in that folder.
-- Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Are you sure you want to delete "[file name]" and all of it's contents?` before deleting the `.fable` file and all of its contents from disk.
-- the delete confirmation dialog omits warning/footer helper copy, centers rounded-pill Cancel and Delete actions, lets arrow keys move the highlighted selection between actions, and activates the highlighted action with Enter
+- Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Move "[file name]" and all its contents to Trash?` before moving the entire `.fable` file to the system Trash. It can be restored using the operating system until Trash is emptied; a Trash failure leaves the document open and never falls back to permanent deletion.
+- the delete confirmation dialog omits warning/footer helper copy, centers rounded-pill Cancel and Move to Trash actions, lets arrow keys move the highlighted selection between actions, and activates the highlighted action with Enter
 - confirming deletion of the currently open `.fable` file closes the active document and returns to startup
 - shuffle, merge, indent, outdent, and text-entry commands do not mutate folder or `.fable` document context cards; FABLE document renaming and confirmed FABLE deletion are the only filename mutations in folder context.
 - typing any printable character enters edit mode and forwards that character into the editor
@@ -269,13 +271,14 @@ animation: ~140ms ease-in-out
 - Cmd/Ctrl+C in navigation mode copies only the active writing card's content and does not create a document history entry
 - Cmd/Ctrl+X in navigation mode serializes the active writing card plus descendants, removes that subtree immediately, and records one navigation history entry
 - cutting the final remaining root card clears the root and removes descendants instead of deleting the final card
-- Cmd/Ctrl+V in navigation mode pastes only valid Fablecraft card clipboard payloads into an empty leaf writing card
-- pasted subtrees map the payload root onto the existing empty target card, recreate descendants with fresh ids, and set all pasted card `documentId` values to the active document
+- Cmd/Ctrl+V in navigation mode pastes only valid Fablecraft card clipboard payloads, replacing an empty leaf writing card in place or creating a new sibling directly below an occupied or structural writing card
+- copied payloads preserve the source card's rich editor JSON instead of falling back to plain-text clipboard insertion
+- pasted subtrees map the payload root onto the in-place or newly created target card, recreate descendants with fresh ids, and set all pasted card `documentId` values to the active document
 - card clipboard payloads can be pasted across `.fable` documents, with undo/redo remaining local to each document's history
 - card clipboard commands do not mutate folder or `.fable` explorer context cards, and editing mode preserves normal text clipboard behavior
 - no invalid moves
 - empty cards cannot spawn new cards
-- newly created cards use an empty level-one heading document without an editor-appended trailing paragraph
+- newly created cards use a single empty paragraph: `NEW_CARD_EDITOR_DOCUMENT_JSON` aliases `EMPTY_EDITOR_DOCUMENT_JSON` for frontend sibling/child/parent creation, and the Rust repository and MCP creation tools use the same paragraph structure; heading formatting is applied through Markdown input rules rather than card generation
 
 ### Editing
 - enter/escape behavior correct
@@ -286,12 +289,13 @@ animation: ~140ms ease-in-out
 - ArrowRight at the end of a card moves into the first child in edit mode at the start of that card
 - Tab+Arrow navigates nearby cards, places the caret at the end of the destination card, and stays in edit mode
 - Tab+Arrow creates a card in the pointed direction when no nearby destination card exists in edit mode
-- Enter in an empty new-card heading converts the single heading line to a paragraph and does not create a sibling
+- Enter in an empty Markdown heading converts it to a paragraph and does not create a sibling
 - Enter in a non-empty heading inserts a regular paragraph below the heading without creating a sibling or converting the heading itself
 - Option+Up / Down in edit mode merges with the sibling above or below without leaving edit mode
 - markdown shortcuts render correctly, including visible list and heading styling
 - preview mode preserves heading and list structure after a card is deselected
 - double-enter creates a sibling below and trims the trailing empty paragraph from the source card
+- Enter on an internal empty top-level paragraph, or at the start of the lower block immediately after an empty paragraph (the third Enter when dividing existing text), splits the live ProseMirror document around the blank paragraph; pass both rich JSON sections through `onCreateBelow`, replace the source and new sibling in one navigation history change, and focus the new sibling at its start in editing mode. Do not flatten the sections to plain text or leave the lower section in the source card.
 - card exit paths trim trailing empty paragraphs and trailing hard breaks from the source card
 - split works
 
@@ -306,6 +310,7 @@ animation: ~140ms ease-in-out
 - cards do not resize on selection alone
 - preview cards retain measured height instead of collapsing back to the minimum, and they remeasure when content changes
 - measured card height uses the full rendered card surface so edit mode does not change wrapping or sibling spacing
+- The active shell's `minHeight` uses only `uiMetrics.cardHeight`, never the cached or estimated `card.height`. Cached/estimated heights position the spatial layout; the unconstrained full shell supplies actual measurements through `ResizeObserver` as content grows or shrinks. Feeding the cached height back into the measured shell's minimum creates a non-shrinking sizing loop and traps overestimates or pre-split heights as empty space.
 - the active card keeps the same renderer footprint between navigation and editing
 - oversized active cards use viewport-aware vertical positioning: navigation pins the card top inside the viewport, while editing pins the card bottom inside the viewport with buffer
 - increased internal card padding still preserves the same active vs inactive footprint
@@ -316,7 +321,7 @@ animation: ~140ms ease-in-out
 - card number labels use a theme token with a lighter dark-mode value
 - neighborhood and non-neighborhood cards keep full text contrast without shadow treatment
 - immediate parent aligns with the active card
-- the first immediate child aligns to the active card centerline, and later children stack below it even when that child column also contains other subtree groups
+- normal `stageLayout` receives the remembered child map and aligns the remembered immediate child (otherwise the first) with the active card centerline, stacking siblings above/below in tree order without overlap; remembered deeper return paths stay aligned as well
 - non-active first children in the active child column prefer their own parent's visible top-aligned child slot and are displaced only far enough to avoid the active child group or reserved empty child slot, with later siblings stacked directly below them
 - the active child-group anchor must preserve the top-to-bottom order of neighboring sibling subtrees in that column
 - when the active card has no children, the child column still reserves a centered empty slot with the active card's measured footprint before sibling child groups above and below are packed
@@ -382,12 +387,14 @@ animation: ~140ms ease-in-out
 - the help sheet lists both Show Command List and Show Shortcuts
 - the help sheet includes the merge shortcuts and merge command labels
 - the command palette exposes Merge with Above and Merge Below when the active card has sibling targets
+- the command palette exposes Convert Card to Document when a real card is selected; it uses the same save dialog path as document creation, builds a new snapshot from the selected subtree with the target document id, saves the target by explicit path, saves the source document by explicit path after removing the subtree, and opens the new document
 - integration setup commands show a tick when the local config already contains the Fablecraft MCP entry
 - Cmd/Ctrl+F opens centered search over the document
 - settings labels clearly distinguish theme, text size, line height, and card width
 - settings include a neighbor-card visibility preference; hidden mode suppresses non-active normal workspace card shells while preserving keyboard navigation and overview rendering
 - settings overlays stay within the viewport and scroll internally when content is tall
 - settings update token-backed UI immediately and persist locally
+- Beta notice dismissal is stored by `src/storage/betaNotice.ts` under the app-wide localStorage key `fablecraft:beta-notice-dismissed`, independently of documents and UI preferences. `App` reads it in the initial state initializer to avoid flashing the bar on subsequent windows or restarts; clicking × persists dismissal before hiding the bar.
 
 ### Desktop Updates
 - startup update checks prompt only when a signed update is available
@@ -425,6 +432,7 @@ animation: ~140ms ease-in-out
 - the desktop app checks the same signed updater manifest shortly after startup and through manual Check for Updates actions
 - `.env.example` documents the required website env vars for Vercel or other static hosting
 - maintainers publish a new website-backed macOS download by pushing a `v*` tag that matches the desktop version and letting the GitHub Actions workflow attach the renamed DMG asset to the release
+- Release `v0.3.0` keeps the version synchronized across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; user-facing changes are recorded in `docs/releases/v0.3.0.md`.
 - website runtime detection must not invoke desktop updater behavior in browser builds
 
 ---
@@ -465,6 +473,7 @@ Card numbering:
 - Search results must display the derived card label alongside matched content.
 Settings presentation:
 - Settings rows should expose row-level keyboard focus visually with a leading chevron-style cue.
+- Render the chevron glyph only for the active row, retaining its fixed-width slot on inactive rows; do not fade chevrons with opacity transitions, which can leave multiple selection cues visible during navigation.
 - Setting options may use stylized capsule controls, but keyboard behavior remains row-based: up/down moves between rows and left/right changes the current value.
 - `SettingsDialog` tracks the active row separately from transient DOM focus and restores focus after preference writes so theme token updates do not drop chevrons or keyboard navigation.
 - Native window appearance sync should restore window and webview focus while Settings is open because macOS/Tauri theme updates can make the webview stop receiving keyboard events until the window is clicked.
@@ -476,6 +485,7 @@ Settings presentation:
 - The startup and booting panels should visually mirror the website hero wordmark treatment instead of using a separate desktop-only title style.
 - Startup, the command palette, and the native File menu should read recent-document history to populate an `Open Recent` path into a dedicated recent-files surface; bootstrap should no longer auto-open any document.
 - Recent-document history should store up to five deduplicated paths in recency order while preserving the legacy single-path key as a compatibility fallback.
+- Recent history is validated through the read-only `existing_document_paths` Tauri command using filesystem metadata before startup display and every startup/menu/palette Open Recent action. `src/storage/recentDocuments.ts` prunes confirmed missing paths and directories from both history keys, preserves concurrent history edits, and never opens SQLite or changes the active document. Check failures hide unverified entries and show an error without pruning saved history.
 - `StartupPanel` should use `Structured Thought, Locally Crafted.` as its sole tagline, rendered below the horizontal rule in a lighter uppercase style with `Locally Crafted.` on a second line, and implement stable row-based keyboard focus so up/down arrows move between rows, `Escape` returns from the recent-files submenu, and the row chevron stays tied to the current selection state.
 Tree editing:
 - Empty-card backspace in the editor must distinguish between leaf deletion and wrapper removal.
@@ -488,3 +498,14 @@ Tree editing:
 - When Backspace or Escape abandons an empty child leaf card from editing mode, focus should return to the deleted card's parent instead of the nearest spatial sibling.
 - Empty-card deletion should allow removing a root-level card whenever any other card exists in the tree. The final remaining card in the whole tree is protected from removal, and navigation-mode deletion should clear its content instead.
 - `CardEditor` should suppress `Escape`-to-navigation on the final remaining empty card so startup editing does not strand the user in navigation mode.
+
+### Document Trash cleanup
+
+- Trash failures include the document path and system error in `AppErrorPayload.details`, also logged to stderr with `[document_trash_failed]`. `DocumentWorkspace` displays those details with preserved line breaks and wrapped, scrollable overflow; failed deletion keeps the document and state intact. `document_trash.rs` calls macOS `NSFileManager` directly through `objc2-foundation` to retain NSError domain, code, and userInfo (including underlying errors) that the `trash` crate's Display conversion discards. Other platforms use the `trash` crate.
+- The native Trash helper moves documents to the OS Trash; the command clears matching backend document state and queued open requests after success, and removes persisted open-session references.
+- Every successful deletion removes the recent-document entry. Deleting the active document also clears its snapshot, undo/redo histories, save status, and selected card before returning to startup. Other open documents remain untouched.
+- Directory rendering filters successfully trashed paths so delayed listings cannot bring them back. Autosave ignores results after its effect is cancelled. Existing-document SQLite connections omit CREATE to prevent a racing operation from recreating a deleted file.
+- On macOS where full Xcode is awaiting license acceptance, verification can use the installed Command Line Tools without changing global configuration: `DEVELOPER_DIR=/Library/Developer/CommandLineTools cargo test --manifest-path src-tauri/Cargo.toml`.
+- macOS first uses `NSFileManager.trashItemAtURL`. On failure, `document_trash.rs` logs `[document_trash_fallback]` and retries via the `trash` crate's explicit `DeleteMethod::Finder`. This can require macOS Automation consent, including for the launching terminal during development. Success from either method permits state cleanup; if both fail, the error retains both diagnostics and no state cleanup occurs. Neither path uses permanent deletion. Recovery remains possible by moving the file out of Trash.
+- The opt-in native smoke test `cargo test --manifest-path src-tauri/Cargo.toml native_trash_moves_disposable_file -- --ignored` creates a uniquely named disposable `.fable` in the temporary directory and moves it to the real system Trash. Normal tests skip this OS-integrating check.
+- `src-tauri/Info.plist` supplies the Finder Automation usage description; `src-tauri/Entitlements.plist`, referenced by `bundle.macOS.entitlements`, enables Apple Events consent for hardened macOS bundles. These declarations support the Trash fallback and do not grant consent automatically.

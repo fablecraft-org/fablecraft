@@ -9,7 +9,7 @@ import {
   createCardCutPayload,
   decodeCardClipboardPayload,
   encodeCardClipboardPayload,
-  pasteCardClipboardPayload,
+  pasteCardClipboardPayloadWithResult,
   removeCutSubtree,
   type CardClipboardPayload,
 } from "../domain/document/clipboard";
@@ -21,9 +21,10 @@ import {
   replaceCardContent,
   trimTrailingEmptyParagraphs,
 } from "../domain/document/content";
-import { EMPTY_EDITOR_DOCUMENT_JSON, NEW_CARD_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
+import { EMPTY_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
 import {
   firstChildCardId,
+  preferredChildCardId,
   parentCardId,
 } from "../domain/document/navigation";
 import { ancestorsOfCard, nextCardInColumn, overviewTreeLayout, previousCardInColumn, stageLayout } from "../domain/document/spatial";
@@ -293,6 +294,8 @@ export function DocumentWorkspace({
     text: string;
   } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const deletedPathsRef = useRef(new Set<string>());
+  const deleteInFlightRef = useRef(false);
   const cancelDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
   const tabKeyHeldRef = useRef(false);
@@ -311,6 +314,7 @@ export function DocumentWorkspace({
   const [workspaceViewportHeight, setWorkspaceViewportHeight] =
     useState(viewportHeight);
   const [directory, setDirectory] = useState<FableDirectory | null>(null);
+  const [parentDirectory, setParentDirectory] = useState<FableDirectory | null>(null);
   const [previewDirectory, setPreviewDirectory] = useState<FableDirectory | null>(null);
   const [directoryLoadError, setDirectoryLoadError] = useState<string | null>(null);
   const [documentDeleteError, setDocumentDeleteError] = useState<string | null>(null);
@@ -327,6 +331,12 @@ export function DocumentWorkspace({
   const [renameDraft, setRenameDraft] = useState("");
   const activeCardId = useInteractionStore((state) => state.activeCardId);
   const setActiveCardId = useInteractionStore((state) => state.setActiveCardId);
+  const rememberedChildIds = useInteractionStore((state) => state.rememberedChildIds);
+  const rememberChild = useInteractionStore((state) => state.rememberChild);
+  const clearChildMemory = useInteractionStore((state) => state.clearChildMemory);
+  useEffect(() => {
+    clearChildMemory();
+  }, [document.documentId, clearChildMemory]);
   const mode = useAppStore((state) => state.mode);
   const setMode = useAppStore((state) => state.setMode);
   const setNotice = useAppStore((state) => state.setNotice);
@@ -424,6 +434,33 @@ export function DocumentWorkspace({
     };
   }, [document.documentId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setParentDirectory(null);
+
+    if (explorerSelection.kind === "folder" && directory?.parentFolderPath) {
+      const parentPath = directory.parentFolderPath;
+      void listFableDirectory(parentPath).then(
+        (listing) => {
+          if (!cancelled && listing.folderPath === parentPath) {
+            setParentDirectory(listing);
+          }
+        },
+        (error) => {
+          if (!cancelled) {
+            setDirectoryLoadError(
+              error instanceof Error ? error.message : "Could not read parent folder.",
+            );
+          }
+        },
+      );
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [directory?.folderPath, directory?.parentFolderPath, explorerSelection.kind]);
+
   const activeSnapshot =
     snapshot?.summary.documentId === document.documentId ? snapshot : null;
   const isExplorerSelectionActive = explorerSelection.kind !== "card";
@@ -435,8 +472,14 @@ export function DocumentWorkspace({
         : explorerSelection.kind === "card" && explorerSelection.parentPath
           ? directory?.entries.find((entry) => entry.path === explorerSelection.parentPath) ?? null
       : null;
-  const directoryEntries = directory?.entries ?? [];
-  const previewDirectoryEntries = previewDirectory?.entries ?? [];
+  const directoryEntries = (directory?.entries ?? []).filter((entry) => !deletedPathsRef.current.has(entry.path));
+  const folderSiblingEntries = (parentDirectory?.entries ?? []).filter(
+    (entry) => !deletedPathsRef.current.has(entry.path),
+  );
+  const activeFolderIndex = folderSiblingEntries.findIndex(
+    (entry) => entry.path === directory?.folderPath,
+  );
+  const previewDirectoryEntries = (previewDirectory?.entries ?? []).filter((entry) => !deletedPathsRef.current.has(entry.path));
   const currentDocumentDirectoryEntry =
     directoryEntries.find((entry) => entry.path === directory?.currentDocumentPath) ?? null;
   const selectedPreviewEntry =
@@ -547,6 +590,7 @@ export function DocumentWorkspace({
           cardHeights: measuredCardHeights,
           cardWidth: uiMetrics.cardWidth,
           spacing: uiMetrics.spacing,
+          rememberedChildIds,
         })
       : { cards: [], emptyChildGap: null };
   const overviewLayoutResult =
@@ -624,7 +668,7 @@ export function DocumentWorkspace({
   const explorerRowGap = uiMetrics.cardHeight + uiMetrics.spacing;
   const explorerEntryY = (index: number) => {
     if (explorerSelection.kind === "folder") {
-      return index * explorerRowGap;
+      return (index - rememberedEntryIndex(directoryEntries, directory?.folderPath)) * explorerRowGap;
     }
 
     if (explorerSelection.kind === "entry" || explorerSelection.kind === "current-document") {
@@ -639,7 +683,7 @@ export function DocumentWorkspace({
   };
   const previewEntryY = (index: number) => {
     if (explorerSelection.kind === "entry") {
-      return index * explorerRowGap;
+      return (index - rememberedEntryIndex(previewDirectoryEntries, selectedDirectoryEntry?.path)) * explorerRowGap;
     }
 
     if (
@@ -695,7 +739,12 @@ export function DocumentWorkspace({
         columnWidth +
         explorerColumnWidth * 3,
     );
-    stagePanLimit.y = Math.max(stagePanLimit.y, explorerPanLimit, previewPanLimit);
+    stagePanLimit.y = Math.max(
+      stagePanLimit.y,
+      explorerPanLimit,
+      previewPanLimit,
+      folderSiblingEntries.length * explorerRowGap,
+    );
   }
   if (emptyChildGap && !isOverviewMode) {
     stagePanLimit.x = Math.max(stagePanLimit.x, Math.abs(emptyChildGap.x) + layoutMetrics.cardWidth);
@@ -722,11 +771,9 @@ export function DocumentWorkspace({
         ]
       : [],
   );
-  const isSelectedCardNewEmptyHeading =
-    selectedCardContent === NEW_CARD_EDITOR_DOCUMENT_JSON;
   const activeHorizontalPadding = 33;
-  const activeTopPadding = isSelectedCardNewEmptyHeading ? 33 : 40;
-  const activeBottomPadding = isSelectedCardNewEmptyHeading ? 33 : 23;
+  const activeTopPadding = 40;
+  const activeBottomPadding = 23;
 
   function focusCardForEditing(
     nextCardId: string | null,
@@ -760,6 +807,20 @@ export function DocumentWorkspace({
     }
   }
 
+  function selectFolderSibling(entry: FableDirectoryEntry) {
+    if (entry.path === directory?.folderPath) {
+      return;
+    }
+    if (entry.kind === "folder") {
+      void openDirectory(entry.path);
+    } else if (parentDirectory) {
+      setDirectory(parentDirectory);
+      setPreviewDirectory(null);
+      selectExplorer({ kind: "entry", path: entry.path });
+      setMode("navigation");
+    }
+  }
+
   async function createDocumentInCurrentDirectory() {
     if (!directory) {
       return;
@@ -767,6 +828,7 @@ export function DocumentWorkspace({
 
     try {
       const nextDocument = await createUntitledDocumentInDirectory(directory.folderPath);
+      deletedPathsRef.current.delete(nextDocument.path);
       onDocumentCreated?.(nextDocument);
       setDirectory(await listCurrentDocumentDirectory());
       selectExplorer({ kind: "card" });
@@ -860,6 +922,7 @@ export function DocumentWorkspace({
 
     try {
       const nextDocument = await renameFableDocument(previousPath, renameDraft);
+      deletedPathsRef.current.delete(nextDocument.path);
       cancelRename();
       setDirectoryLoadError(null);
       await refreshDirectoryAfterRename(previousPath, nextDocument);
@@ -919,32 +982,40 @@ export function DocumentWorkspace({
   }
 
   async function commitDeleteDocument() {
-    if (!pendingDeleteDocument) {
+    if (!pendingDeleteDocument || deleteInFlightRef.current) {
       return;
     }
 
+    deleteInFlightRef.current = true;
     const deletedDocument = pendingDeleteDocument;
 
     try {
       await deleteFableDocument(deletedDocument.path);
+      deletedPathsRef.current.add(deletedDocument.path);
       setPendingDeleteDocument(null);
       setDocumentDeleteError(null);
 
+      onDocumentDeleted?.(deletedDocument.path);
       if (deletedDocument.path === document.path) {
-        onDocumentDeleted?.(deletedDocument.path);
         return;
       }
 
       await refreshDirectoryAfterDelete(deletedDocument.path);
       setNotice({
         tone: "info",
-        message: `Deleted "${deletedDocument.name}".`,
+        message: `Moved "${deletedDocument.name}" to Trash.`,
       });
     } catch (error) {
       console.error(error);
+      const details = error && typeof error === "object" && "details" in error
+        && typeof error.details === "string" ? error.details : null;
       setDocumentDeleteError(
-        error instanceof Error ? error.message : "Could not delete document.",
+        (error && typeof error === "object" && "message" in error
+          ? String(error.message) : "Could not move document to Trash."
+        ) + (details ? `\n\n${details}` : ""),
       );
+    } finally {
+      deleteInFlightRef.current = false;
     }
   }
 
@@ -961,6 +1032,18 @@ export function DocumentWorkspace({
     return activeSnapshot?.cards
       .filter((card) => card.parentId === null)
       .sort((left, right) => left.orderIndex - right.orderIndex || left.id.localeCompare(right.id))[0]?.id ?? null;
+  }
+
+  function rememberedEntryIndex(entries: FableDirectoryEntry[], folderPath?: string) {
+    const rememberedPath = rememberedChildIds[`folder:${folderPath}`];
+    return Math.max(0, entries.findIndex((entry) => entry.path === rememberedPath));
+  }
+
+  function preferredRootCardId() {
+    const rememberedId = rememberedChildIds[`document:${document.path}`];
+    return activeSnapshot?.cards.some((card) => card.id === rememberedId && card.parentId === null)
+      ? rememberedId
+      : firstRootCardId();
   }
 
   function selectEntryAtIndex(index: number) {
@@ -1003,7 +1086,7 @@ export function DocumentWorkspace({
     return true;
   }
 
-  async function selectFirstVisibleChildOfFolder(entry: FableDirectoryEntry) {
+  async function selectPreferredChildOfFolder(entry: FableDirectoryEntry) {
     if (entry.kind !== "folder") {
       return false;
     }
@@ -1013,11 +1096,12 @@ export function DocumentWorkspace({
         previewDirectory?.folderPath === entry.path
           ? previewDirectory
           : await listFableDirectory(entry.path);
-      const firstVisibleChild = nextPreviewDirectory.entries[0];
+      const visibleEntries = nextPreviewDirectory.entries.filter((child) => !deletedPathsRef.current.has(child.path));
+      const preferredChild = visibleEntries[rememberedEntryIndex(visibleEntries, entry.path)];
 
       setPreviewDirectory(nextPreviewDirectory);
 
-      if (!firstVisibleChild) {
+      if (!preferredChild) {
         await openDirectory(entry.path);
         return true;
       }
@@ -1025,7 +1109,7 @@ export function DocumentWorkspace({
       selectExplorer({
         kind: "preview-entry",
         parentPath: entry.path,
-        path: firstVisibleChild.path,
+        path: preferredChild.path,
       });
       setMode("navigation");
       return true;
@@ -1064,7 +1148,7 @@ export function DocumentWorkspace({
 
     if (entry.path === document.path) {
       selectExplorer({ kind: "card" });
-      const rootId = firstRootCardId();
+      const rootId = preferredRootCardId();
 
       if (rootId) {
         setActiveCardId(rootId);
@@ -1720,16 +1804,19 @@ export function DocumentWorkspace({
           event.preventDefault();
 
           if (explorerSelection.kind === "current-document") {
+            if (directory) rememberChild(`folder:${directory.folderPath}`, document.path);
             selectExplorer({ kind: "folder" });
             return;
           }
 
           if (explorerSelection.kind === "entry") {
+            if (directory) rememberChild(`folder:${directory.folderPath}`, explorerSelection.path);
             selectExplorer({ kind: "folder" });
             return;
           }
 
           if (explorerSelection.kind === "preview-entry") {
+            rememberChild(`folder:${explorerSelection.parentPath}`, explorerSelection.path);
             selectExplorer({
               kind: "entry",
               path: explorerSelection.parentPath,
@@ -1738,6 +1825,7 @@ export function DocumentWorkspace({
           }
 
           if (explorerSelection.kind === "folder" && directory?.parentFolderPath) {
+            rememberChild(`folder:${directory.parentFolderPath}`, directory.folderPath);
             void openDirectory(directory.parentFolderPath);
           }
           return;
@@ -1747,7 +1835,7 @@ export function DocumentWorkspace({
           event.preventDefault();
 
           if (explorerSelection.kind === "current-document") {
-            const rootId = firstRootCardId();
+            const rootId = preferredRootCardId();
 
             if (rootId) {
               setActiveCardId(rootId);
@@ -1757,13 +1845,13 @@ export function DocumentWorkspace({
           }
 
           if (explorerSelection.kind === "folder") {
-            selectEntryAtIndex(0);
+            selectEntryAtIndex(rememberedEntryIndex(directoryEntries, directory?.folderPath));
             return;
           }
 
           if (explorerSelection.kind === "entry") {
             if (selectedDirectoryEntry?.kind === "folder") {
-              void selectFirstVisibleChildOfFolder(selectedDirectoryEntry);
+              void selectPreferredChildOfFolder(selectedDirectoryEntry);
               return;
             }
 
@@ -1782,7 +1870,7 @@ export function DocumentWorkspace({
             }
 
             if (selectedPreviewEntry.path === document.path) {
-              const rootId = firstRootCardId();
+              const rootId = preferredRootCardId();
 
               if (rootId) {
                 setActiveCardId(rootId);
@@ -1804,6 +1892,15 @@ export function DocumentWorkspace({
           event.preventDefault();
 
           const direction = event.key === "ArrowUp" ? -1 : 1;
+          if (explorerSelection.kind === "folder") {
+            const nextEntry = folderSiblingEntries[activeFolderIndex + direction];
+            if (activeFolderIndex !== -1 && nextEntry) {
+              clearChildMemory();
+              setActiveCardId(firstRootCardId());
+              selectFolderSibling(nextEntry);
+            }
+            return;
+          }
           const currentIndex =
             explorerSelection.kind === "entry"
               ? selectedEntryIndex()
@@ -1819,6 +1916,11 @@ export function DocumentWorkspace({
             currentIndex === -1
               ? fallbackIndex
               : Math.max(0, Math.min(activeEntries.length - 1, currentIndex + direction));
+
+          if (nextIndex !== currentIndex && activeEntries[nextIndex]) {
+            clearChildMemory();
+            setActiveCardId(firstRootCardId());
+          }
 
           if (explorerSelection.kind === "preview-entry") {
             selectPreviewEntryAtIndex(nextIndex);
@@ -1994,7 +2096,7 @@ export function DocumentWorkspace({
         event.key === "ArrowLeft"
           ? parentCardId(currentSnapshot.cards, currentCardId)
           : event.key === "ArrowRight"
-            ? firstChildCardId(currentSnapshot.cards, currentCardId)
+            ? preferredChildCardId(currentSnapshot.cards, currentCardId, rememberedChildIds)
             : event.key === "ArrowUp"
               ? previousCardInColumn(currentSnapshot.cards, currentCardId)
               : event.key === "ArrowDown"
@@ -2008,6 +2110,7 @@ export function DocumentWorkspace({
           directory
         ) {
           event.preventDefault();
+          rememberChild(`document:${document.path}`, currentCardId);
           selectExplorer(
             explorerSelection.kind === "card" &&
               explorerSelection.parentPath &&
@@ -2027,6 +2130,11 @@ export function DocumentWorkspace({
 
       event.preventDefault();
       preserveDocumentTreeExplorerContext();
+      if (event.key === "ArrowLeft") {
+        rememberChild(nextCardId, currentCardId);
+      } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        clearChildMemory();
+      }
       setActiveCardId(nextCardId);
       setPendingEditorFocusPlacement(null);
       setPendingEditorTextInput(null);
@@ -2056,7 +2164,13 @@ export function DocumentWorkspace({
     activeSnapshot,
     applyNavigationChange,
     directory,
+    rememberedChildIds,
+    rememberChild,
+    clearChildMemory,
     directoryEntries,
+    parentDirectory,
+    folderSiblingEntries,
+    activeFolderIndex,
     explorerSelection,
     isOverviewMode,
     mode,
@@ -2165,7 +2279,7 @@ export function DocumentWorkspace({
       }
 
       try {
-        const nextSnapshot = pasteCardClipboardPayload(
+        const pasteResult = pasteCardClipboardPayloadWithResult(
           activeSnapshot,
           activeCardId,
           payload,
@@ -2173,8 +2287,8 @@ export function DocumentWorkspace({
         );
 
         event.preventDefault();
-        applyNavigationChange(() => nextSnapshot);
-        setActiveCardId(activeCardId);
+        applyNavigationChange(() => pasteResult.snapshot);
+        setActiveCardId(pasteResult.pastedRootCardId);
         setPendingEditorFocusPlacement(null);
         setPendingEditorTextInput(null);
         setNotice({
@@ -2197,14 +2311,14 @@ export function DocumentWorkspace({
       }
     }
 
-    window.addEventListener("copy", handleCopy);
-    window.addEventListener("cut", handleCut);
-    window.addEventListener("paste", handlePaste);
+    window.addEventListener("copy", handleCopy, true);
+    window.addEventListener("cut", handleCut, true);
+    window.addEventListener("paste", handlePaste, true);
 
     return () => {
-      window.removeEventListener("copy", handleCopy);
-      window.removeEventListener("cut", handleCut);
-      window.removeEventListener("paste", handlePaste);
+      window.removeEventListener("copy", handleCopy, true);
+      window.removeEventListener("cut", handleCut, true);
+      window.removeEventListener("paste", handlePaste, true);
     };
   }, [
     activeCardId,
@@ -2265,6 +2379,23 @@ export function DocumentWorkspace({
                 y={stageOffset.y}
               />
             ) : null}
+            {explorerSelection.kind === "folder" && activeFolderIndex !== -1
+              ? folderSiblingEntries.map((entry, index) =>
+                  entry.path === directory.folderPath ? null : (
+                    <ExplorerCard
+                      isActive={false}
+                      key={entryId(entry)}
+                      kind={entry.kind === "folder" ? "folder" : "document"}
+                      label={explorerLabelForEntry(entry)}
+                      meta={entry.kind === "folder" ? "FOLDER" : "FABLE"}
+                      onClick={() => selectFolderSibling(entry)}
+                      width={explorerCardWidth}
+                      x={stageOffset.x}
+                      y={(index - activeFolderIndex) * explorerRowGap + stageOffset.y}
+                    />
+                  ),
+                )
+              : null}
             {(explorerSelection.kind === "preview-entry" ||
               (explorerSelection.kind === "card" && selectedPreviewEntry)) &&
             selectedDirectoryEntry ? (
@@ -2516,7 +2647,9 @@ export function DocumentWorkspace({
                       borderWidth: "0px",
                       boxShadow: "var(--fc-shadow-elevated)",
                       left: `calc(50% + ${displayX}px)`,
-                      minHeight: `${card.height}px`,
+                      // Cached/estimated heights position cards; only the base
+                      // minimum may constrain the surface we measure for that cache.
+                      minHeight: `${uiMetrics.cardHeight}px`,
                       paddingBottom: `${activeBottomPadding}px`,
                       paddingLeft: `${activeHorizontalPadding}px`,
                       paddingRight: `${activeHorizontalPadding}px`,
@@ -2549,7 +2682,7 @@ export function DocumentWorkspace({
                       isEditing={mode === "editing"}
                       onConsumeFocusPlacement={() => setPendingEditorFocusPlacement(null)}
                       onConsumePendingTextInput={() => setPendingEditorTextInput(null)}
-                      onCreateBelow={() => {
+                      onCreateBelow={(splitContent) => {
                         if (!canCreateStructure) {
                           return;
                         }
@@ -2562,14 +2695,21 @@ export function DocumentWorkspace({
                             newCardId,
                           );
 
-                          return replaceCardContent(nextSnapshot, {
+                          nextSnapshot = replaceCardContent(nextSnapshot, {
                             cardId: selectedCard.id,
-                            contentJson: trimTrailingEmptyParagraphs(
+                            contentJson: splitContent?.before ?? trimTrailingEmptyParagraphs(
                               cardContent(nextSnapshot, selectedCard.id),
                             ),
                           });
+
+                          return splitContent
+                            ? replaceCardContent(nextSnapshot, {
+                                cardId: newCardId,
+                                contentJson: splitContent.after,
+                              })
+                            : nextSnapshot;
                         });
-                        focusCardForEditing(newCardId, "end");
+                        focusCardForEditing(newCardId, splitContent ? "start" : "end");
                       }}
                       onCreateChild={() => {
                         if (!canCreateStructure) {
@@ -2794,16 +2934,16 @@ export function DocumentWorkspace({
       {pendingDeleteDocument ? (
         <OverlayShell
           onBackdropMouseDown={cancelDeleteDocument}
-          title="Delete Document"
+          title="Move Document to Trash"
           widthClassName="max-w-[min(92vw,520px)]"
         >
           <div className="space-y-7">
             <p className="font-[var(--fc-font-content)] text-[1.05rem] leading-7 text-[var(--fc-color-text)]">
-              Are you sure you want to delete "{pendingDeleteDocument.name}" and all of it's contents?
+              Move "{pendingDeleteDocument.name}" and all its contents to Trash?
             </p>
             {documentDeleteError ? (
               <p
-                className="font-[var(--fc-font-ui)] text-sm leading-6 text-red-600"
+                className="max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words font-[var(--fc-font-ui)] text-sm leading-6 text-red-600"
                 data-testid="delete-document-error"
               >
                 {documentDeleteError}
@@ -2838,7 +2978,7 @@ export function DocumentWorkspace({
                 ref={confirmDeleteButtonRef}
                 type="button"
               >
-                Delete
+                Move to Trash
               </button>
             </div>
           </div>

@@ -1,10 +1,16 @@
 import { act } from "react";
 import type { ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
+import type { Editor } from "@tiptap/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardEditor } from "../src/components/CardEditor";
 import { contentJsonForPlainText, contentText } from "../src/domain/document/content";
 import { NEW_CARD_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
+
+const EMPTY_HEADING_JSON = JSON.stringify({
+  type: "doc",
+  content: [{ type: "heading", attrs: { level: 1 } }],
+});
 
 function renderEditor(
   overrides: Partial<ComponentProps<typeof CardEditor>> = {},
@@ -173,9 +179,43 @@ describe("CardEditor keyboard behavior", () => {
     });
   });
 
-  it("turns an empty new-card heading into regular text on Enter", async () => {
+  it("starts new cards with normal text when typing", async () => {
     const { container, props, root } = renderEditor({
       contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
+    });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => { element.editor.commands.insertContent("Ordinary text"); });
+    expect(element.querySelector("p")?.textContent).toBe("Ordinary text");
+    expect(element.querySelector("h1, h2, h3, h4, h5, h6")).toBeNull();
+    await act(async () => { root.unmount(); });
+  });
+
+  it.each([1, 2, 3])("turns a new card into a level %i heading only after a Markdown marker and space", async (level) => {
+    const { container, props, root } = renderEditor({
+      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
+    });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.insertContent("#".repeat(level));
+    });
+    expect(element.querySelector("p")?.textContent).toBe("#".repeat(level));
+    expect(element.querySelector("h1, h2, h3")).toBeNull();
+    await act(async () => {
+      const view = element.editor.view;
+      const { from, to } = view.state.selection;
+      view.someProp("handleTextInput", (handler) => handler(
+        view, from, to, " ", () => view.state.tr.insertText(" ", from, to),
+      ));
+    });
+    expect(element.querySelector(`h${level}`)).not.toBeNull();
+    await act(async () => { root.unmount(); });
+  });
+
+  it("turns an empty Markdown heading into regular text on Enter", async () => {
+    const { container, props, root } = renderEditor({
+      contentJson: EMPTY_HEADING_JSON,
       focusPlacement: "end",
     });
 
@@ -289,7 +329,7 @@ describe("CardEditor keyboard behavior", () => {
     });
 
     const { container, props, root } = renderEditor({
-      contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
+      contentJson: EMPTY_HEADING_JSON,
       focusPlacement: "end",
     });
 
@@ -395,6 +435,89 @@ describe("CardEditor keyboard behavior", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("splits around three Enters within text and keeps the caret before the lower rich text", async () => {
+    const { container, props, root } = renderEditor({
+      contentJson: JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [
+          { type: "text", text: "Above" },
+          { type: "text", text: "Below", marks: [{ type: "bold" }] },
+        ] }],
+      }),
+    });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.setTextSelection(6);
+      for (let index = 0; index < 3; index += 1) {
+        element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+      }
+    });
+
+    expect(props.onCreateBelow).toHaveBeenCalledTimes(1);
+    const split = vi.mocked(props.onCreateBelow).mock.lastCall?.[0];
+    if (!split) throw new Error("Expected a split with both sections.");
+    expect(contentText(split.before)).toBe("Above");
+    expect(JSON.parse(split.after)).toEqual({
+      type: "doc",
+      content: [{ type: "paragraph", content: [
+        { type: "text", text: "Below", marks: [{ type: "bold" }] },
+      ] }],
+    });
+
+    await act(async () => {
+      root.render(<CardEditor key="lower" {...props} contentJson={split.after} focusPlacement="start" />);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    const lower = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    expect(lower.editor.state.selection.from).toBe(1);
+    expect(lower.editor.state.selection.empty).toBe(true);
+    expect(lower.getAttribute("contenteditable")).toBe("true");
+    await act(async () => { root.unmount(); });
+  });
+
+  it("moves all rich blocks below an internal blank paragraph into the new card", async () => {
+    const lowerBlocks = [
+      { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Below" }] },
+      { type: "bulletList", content: [{ type: "listItem", content: [
+        { type: "paragraph", content: [{ type: "text", text: "List item" }] },
+      ] }] },
+    ];
+    const { container, props, root } = renderEditor({
+      contentJson: JSON.stringify({ type: "doc", content: [
+        { type: "paragraph", content: [{ type: "text", text: "Above" }] },
+        { type: "paragraph" },
+        ...lowerBlocks,
+      ] }),
+    });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.setTextSelection(8);
+      element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+    });
+    const split = vi.mocked(props.onCreateBelow).mock.lastCall?.[0];
+    if (!split) throw new Error("Expected a split with both sections.");
+    expect(contentText(split.before)).toBe("Above");
+    expect(JSON.parse(split.after).content.slice(0, 2)).toEqual(lowerBlocks);
+    await act(async () => { root.unmount(); });
+  });
+
+  it("still creates an empty sibling when double Enter is pressed at the end", async () => {
+    const { container, props, root } = renderEditor();
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.setTextSelection(element.editor.state.doc.content.size - 1);
+      for (let index = 0; index < 2; index += 1) {
+        element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+      }
+    });
+    expect(props.onCreateBelow).toHaveBeenCalledTimes(1);
+    expect(props.onCreateBelow).toHaveBeenCalledWith();
+    await act(async () => { root.unmount(); });
   });
 
   it("uses Option+ArrowUp to merge with the card above", async () => {

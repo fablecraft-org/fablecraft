@@ -5,6 +5,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { useEffect, useRef } from "react";
 import { trimTrailingEmptyParagraphs } from "../domain/document/content";
 import { EMPTY_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
+import type { SplitCardContent } from "../domain/document/split";
 import { listenForFrontendMenuActions } from "../lib/nativeMenu";
 
 interface CardEditorProps {
@@ -17,7 +18,7 @@ interface CardEditorProps {
   onCreateSiblingAbove: () => void;
   onCreateSiblingBelow: () => void;
   isEditing: boolean;
-  onCreateBelow: () => void;
+  onCreateBelow: (splitContent?: SplitCardContent) => void;
   onConsumeFocusPlacement: () => void;
   onConsumePendingTextInput: () => void;
   onDeleteEmpty: () => void;
@@ -76,6 +77,14 @@ function editorIsEffectivelyEmpty(editor: Editor) {
 
 function editorTextLength(editor: Editor) {
   return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n").length;
+}
+
+function contentAroundDivide(editor: Editor, from: number, to: number): SplitCardContent {
+  const { doc } = editor.state;
+  return {
+    before: trimTrailingEmptyParagraphs(JSON.stringify(doc.cut(0, from).toJSON())),
+    after: JSON.stringify(doc.cut(to).toJSON()),
+  };
 }
 
 function insertParagraphAfterCurrentBlock(editor: Editor) {
@@ -346,6 +355,31 @@ export function CardEditor({
             return true;
           }
 
+          const { doc, selection } = currentEditor.state;
+          const blockIndex = selection.$from.index(0);
+          const previousBlock = blockIndex > 0 ? doc.child(blockIndex - 1) : null;
+
+          // Repeated Enter in the middle of text leaves the caret at the start
+          // of the lower paragraph, with the blank divide just before it.
+          if (
+            selection.empty &&
+            selection.$from.depth === 1 &&
+            selection.$from.parentOffset === 0 &&
+            previousBlock?.type.name === "paragraph" &&
+            previousBlock.content.size === 0
+          ) {
+            event.preventDefault();
+            if (canCreateStructure) {
+              const lowerStart = selection.$from.before(1);
+              onCreateBelow(contentAroundDivide(
+                currentEditor,
+                lowerStart - previousBlock.nodeSize,
+                lowerStart,
+              ));
+            }
+            return true;
+          }
+
           const isEmptyHeading =
             currentEditor.state.selection.empty &&
             currentEditor.state.selection.$from.parent.type.name === "heading" &&
@@ -377,7 +411,17 @@ export function CardEditor({
               return true;
             }
 
-            onCreateBelow();
+            if (selection.$from.depth === 1 && selection.$from.index(0) < doc.childCount - 1) {
+              // Move the lower blocks directly from the live editor so marks and
+              // block structure survive, including text typed before React renders.
+              onCreateBelow(contentAroundDivide(
+                currentEditor,
+                selection.$from.before(1),
+                selection.$from.after(1),
+              ));
+            } else {
+              onCreateBelow();
+            }
             return true;
           }
         }

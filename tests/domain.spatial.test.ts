@@ -11,6 +11,26 @@ import {
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 describe("document spatial helpers", () => {
+  it("anchors remembered children across depths and keeps variable-height siblings apart", () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      { documentId: "doc-1", id: "b1", parentId: "card-b", orderIndex: 0, type: "card" },
+      { documentId: "doc-1", id: "b2", parentId: "card-b", orderIndex: 1, type: "card" },
+    );
+    const options = {
+      cardHeight: 100, cardWidth: 300, spacing: 24,
+      cardHeights: { "card-a": 200, "card-b": 120 },
+      rememberedChildIds: { "card-root": "card-b", "card-b": "b2" },
+    };
+    const layout = stageLayout(snapshot.cards, "card-root", options).cards;
+    expect(layout.find((card) => card.cardId === "card-b")?.y).toBe(0);
+    expect(layout.find((card) => card.cardId === "b2")?.y).toBe(0);
+    expect(layout.find((card) => card.cardId === "card-a")?.y).toBe(-184);
+    expect(layout.find((card) => card.cardId === "b1")?.y).toBe(-124);
+    expect(stageLayout(snapshot.cards, "card-root", { ...options, rememberedChildIds: {} })
+      .cards.find((card) => card.cardId === "card-a")?.y).toBe(0);
+  });
+
   it("returns ancestor chain from root toward the parent", () => {
     const snapshot = makeDocumentSnapshot();
     snapshot.cards.push({

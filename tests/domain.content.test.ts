@@ -14,9 +14,9 @@ describe("document content rules", () => {
     expect(canCreateCardsFromContent(EMPTY_EDITOR_DOCUMENT_JSON)).toBe(false);
   });
 
-  it("uses an empty heading as the default new-card document", () => {
+  it("uses a normal paragraph as the default new-card document", () => {
     expect(JSON.parse(NEW_CARD_EDITOR_DOCUMENT_JSON)).toEqual({
-      content: [{ attrs: { level: 1 }, type: "heading" }],
+      content: [{ type: "paragraph" }],
       type: "doc",
     });
     expect(canCreateCardsFromContent(NEW_CARD_EDITOR_DOCUMENT_JSON)).toBe(false);

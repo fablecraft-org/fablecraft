@@ -1,4 +1,5 @@
 import type { CardRecord } from "./types";
+import { preferredChildCardId } from "./navigation";
 
 export interface SpatialCardPosition {
   cardId: string;
@@ -12,6 +13,7 @@ export interface StageLayoutOptions {
   cardHeights?: Record<string, number>;
   cardWidth: number;
   spacing: number;
+  rememberedChildIds?: Record<string, string>;
 }
 
 export interface StageCardLayout {
@@ -742,6 +744,12 @@ export function stageLayout(
         );
       }
 
+      const anchorChildId = preferredChildCardId(
+        cards, activeCardId, options.rememberedChildIds ?? {},
+      )!;
+      const anchorCenter = nextCenters.get(anchorChildId) ?? 0;
+      nextCenters.forEach((center, cardId) => nextCenters.set(cardId, center - anchorCenter));
+
       for (let index = firstActiveChildIndex - 1; index >= 0; index -= 1) {
         const currentCardId = activeChildColumnCards[index]!.cardId;
         const nextCardId = activeChildColumnCards[index + 1]!.cardId;
@@ -856,6 +864,22 @@ export function stageLayout(
       x: columnWidth,
       y: 0,
     };
+  }
+
+  // Preserve deeper horizontal return paths as well as the immediate child slot.
+  let rememberedParentId = preferredChildCardId(
+    cards, activeCardId, options.rememberedChildIds ?? {},
+  );
+  while (rememberedParentId) {
+    const childId = options.rememberedChildIds?.[rememberedParentId];
+    const child = cards.find((card) => card.id === childId && card.parentId === rememberedParentId);
+    if (!child) break;
+    const position = positionsById.get(child.id)!;
+    repackColumnAroundAnchor(
+      cards, cardsByColumn.get(position.column) ?? [], child.id,
+      options.spacing, heightForCardId, yByCard,
+    );
+    rememberedParentId = child.id;
   }
 
   const siblingIds = new Set(

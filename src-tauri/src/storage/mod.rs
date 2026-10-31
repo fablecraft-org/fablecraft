@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ mod migrations;
 
 const DEFAULT_CARD_TYPE: &str = "card";
 const NEW_CARD_EDITOR_DOCUMENT: &str =
-    r#"{"type":"doc","content":[{"type":"heading","attrs":{"level":1}}]}"#;
+    r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
 const REVISION_PREVIEW_LIMIT: i64 = 20;
 
 #[derive(Debug, Clone, Serialize)]
@@ -128,7 +128,7 @@ impl DocumentRepository {
             fs::create_dir_all(parent)?;
         }
 
-        let mut connection = open_connection(&path)?;
+        let mut connection = open_connection(&path, true)?;
         run_migrations(&mut connection)?;
         seed_document(&mut connection)?;
         summarize_document(&connection, &path)
@@ -144,7 +144,7 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path)?;
+        let mut connection = open_connection(&path, false)?;
         run_migrations(&mut connection)?;
         summarize_document(&connection, &path)
     }
@@ -159,7 +159,7 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path)?;
+        let mut connection = open_connection(&path, false)?;
         run_migrations(&mut connection)?;
         build_document_snapshot(&connection, &path)
     }
@@ -174,7 +174,7 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path)?;
+        let mut connection = open_connection(&path, false)?;
         run_migrations(&mut connection)?;
         build_document_clock(&connection, &path)
     }
@@ -192,7 +192,7 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path)?;
+        let mut connection = open_connection(&path, false)?;
         run_migrations(&mut connection)?;
 
         let existing_document_id = document_id(&connection)?;
@@ -252,8 +252,12 @@ impl DocumentRepository {
     }
 }
 
-fn open_connection(path: &Path) -> AppResult<Connection> {
-    let connection = Connection::open(path)?;
+fn open_connection(path: &Path, create: bool) -> AppResult<Connection> {
+    let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE;
+    if create {
+        flags |= OpenFlags::SQLITE_OPEN_CREATE;
+    }
+    let connection = Connection::open_with_flags(path, flags)?;
 
     connection.pragma_update(None, "foreign_keys", "ON")?;
     // Keep the database truly single-file. WAL would introduce -wal and -shm sidecars.
@@ -699,6 +703,13 @@ mod tests {
     }
 
     #[test]
+    fn existing_connection_never_recreates_a_missing_document() {
+        let path = temp_document_path("missing-connection");
+        assert!(super::open_connection(&path, false).is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn create_initializes_schema_and_root_card() {
         let path = temp_document_path("create");
 
@@ -728,7 +739,7 @@ mod tests {
 
         assert_eq!(card_count, 1);
         assert_eq!(content_count, 1);
-        assert_eq!(root_content_json, NEW_CARD_EDITOR_DOCUMENT);
+        assert_eq!(root_content_json, EMPTY_EDITOR_DOCUMENT);
         assert_eq!(layer_table_count, 0);
 
         fs::remove_file(path).expect("temp file should be removable");

@@ -16,6 +16,7 @@ import type { DocumentSummary } from "../types/document";
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 interface DocumentState {
+  clearDocument: () => void;
   applyNavigationChange: (
     updater: (snapshot: DocumentSnapshot) => DocumentSnapshot,
   ) => void;
@@ -44,6 +45,17 @@ interface DocumentState {
 }
 
 export const useDocumentStore = create<DocumentState>((set) => ({
+  clearDocument: () => set({
+    snapshot: null,
+    dirty: false,
+    editingFuture: [],
+    editingPast: [],
+    navigationFuture: [],
+    navigationPast: [],
+    errorMessage: null,
+    lastSavedAtMs: null,
+    saveState: "idle",
+  }),
   applyNavigationChange: (updater) =>
     set((state) => {
       if (!state.snapshot) {
@@ -154,8 +166,7 @@ export const useDocumentStore = create<DocumentState>((set) => ({
     set((state) => {
       if (
         documentId &&
-        state.snapshot &&
-        state.snapshot.summary.documentId !== documentId
+        state.snapshot?.summary.documentId !== documentId
       ) {
         return state;
       }

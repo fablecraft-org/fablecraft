@@ -4,13 +4,15 @@ mod error;
 mod integrations;
 pub mod mcp;
 mod native_menu;
+mod document_trash;
 pub mod session;
 pub mod storage;
 
 use app_state::AppState;
 use commands::{
     create_document, create_untitled_document_in_directory, delete_fable_document,
-    list_current_document_directory, list_fable_directory, load_current_document,
+    existing_document_paths, list_current_document_directory, list_fable_directory,
+    load_current_document,
     load_current_document_clock, open_document, read_text_file, rename_fable_document,
     save_current_document, save_document, take_pending_open_document_paths, write_text_file,
 };
@@ -66,6 +68,7 @@ pub fn run() {
             create_document,
             create_untitled_document_in_directory,
             delete_fable_document,
+            existing_document_paths,
             enable_claude_desktop_integration,
             enable_codex_integration,
             invoke_mcp_tool,

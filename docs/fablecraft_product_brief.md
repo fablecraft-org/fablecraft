@@ -84,21 +84,23 @@ Cards do NOT have titles.
 - Folder and FABLE explorer cards render at half the width of writing cards.
 - Explorer context card labels use plain `FOLDER` and `FABLE` labels.
 - FABLE explorer card names hide the `.fable` file extension.
-- Folder and FABLE explorer cards follow the same spatial navigation model as writing cards: the selected explorer card is centered, its same-level siblings remain visible in the same vertical column, its parent sits one column to the left, and its first visible child sits one column to the right on the same vertical center line.
+- Folder and FABLE explorer cards follow the same spatial navigation model as writing cards: the selected explorer card is centered, its same-level siblings remain visible in the same vertical column, its parent sits one column to the left, and its remembered child (otherwise its first visible child) sits one column to the right on the same vertical center line.
 - Moving left from a root card selects the current `.fable` document card; moving left again selects the containing folder.
 - While navigating normal document cards from the current document card, only the current `.fable` document card remains visible to the left of the writing tree; when the document tree is entered from a folder preview, that folder and its sibling FABLE file column remain visible until the user navigates back out of that folder context.
 - When a folder is selected, its parent folder remains visible to the left when one exists, and the right column immediately shows only child folders and `.fable` files in the selected folder.
+- Moving left from a FABLE file to its containing folder also shows that folder's public sibling folders and `.fable` files in the selected column. Up/Down and clicks select those same-level neighbours; Right selects the remembered child of the active folder, falling back to its first visible child.
 - When a child folder row is selected inside a folder listing, that child folder's own child folders and `.fable` files appear immediately in the next column to the right.
 - Non-`.fable` files are not shown.
+- Dot-prefixed child folders (such as `.git` and `.private`) are hidden from folder listings and previews; only public child folders are shown.
 - Selecting a sibling `.fable` document and moving right opens that document.
 - Pressing Enter on a selected FABLE document card enters inline rename mode; typing edits the filename, Enter commits the rename, and Escape cancels it.
 - FABLE document renames append `.fable` automatically, reject empty names and path separators, and do not overwrite an existing `.fable` file.
 - Selecting a child folder and moving right or pressing Enter browses into that folder.
-- Folder preview children are real navigation targets: Right from a selected child folder moves to its first visible child folder or FABLE file before entering/opening that child.
-- When a FABLE file is selected and it is the open document, Right moves into the document's root card.
+- Folder preview children are real navigation targets: Right from a selected child folder moves to its remembered child folder or FABLE file (otherwise its first visible child) before entering/opening that child.
+- When a FABLE file is selected and it is the open document, Right moves into the document's remembered root card (otherwise its first root card).
 - Ctrl/Cmd+Right on the folder card creates a new untitled `.fable` document in that folder and opens it.
-- Pressing Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Are you sure you want to delete "[file name]" and all of it's contents?` before deleting the `.fable` file and all of its contents from disk.
-- The delete confirmation dialog shows centered rounded-pill Cancel and Delete actions only; arrow keys move the highlighted selection between them and Enter activates the highlighted action.
+- Pressing Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Move "[file name]" and all its contents to Trash?` before moving the entire `.fable` file to the system Trash. It can be restored using the operating system until Trash is emptied; a Trash failure leaves the document open and never falls back to permanent deletion.
+- The delete confirmation dialog shows centered rounded-pill Cancel and Move to Trash actions only; arrow keys move the highlighted selection between them and Enter activates the highlighted action.
 - Confirming deletion of the currently open `.fable` file closes that document and returns to the startup surface.
 - Folder cards cannot be deleted, and folder or `.fable` document cards cannot be merged, outdented, indented, or reordered with card-structure commands.
 
@@ -112,7 +114,7 @@ Cards do NOT have titles.
 
 ## 3. Card Lifecycle
 
-- New cards start as a single empty level-one heading line with no trailing body line
+- New cards start as a single empty paragraph using normal body text. Heading formatting is opt-in through Markdown markers such as `# `, `## `, or `### ` at the start of a line.
 - Empty cards cannot create additional cards
 - If abandoned empty → removed
 - The only card that must never be removed is the final remaining card in the whole tree; deletion of that card clears its content instead.
@@ -153,13 +155,13 @@ navigation | editing | search | command
 ### Navigation
 
 - Left → parent
-- Right → first child
+- Right → last visited child during horizontal navigation, otherwise first child
 - Up → previous card in the current column
 - Down → next card in the current column
 - From a root card, Left moves to the current `.fable` document context card, then to its containing folder.
 - In folder context, Up/Down moves through visible folders and `.fable` files; Right enters folders or opens `.fable` files; Enter renames selected `.fable` files.
 
-Up/down follows the packed spatial column, even across different parent groups. Left/right changes depth.
+Up/down follows the packed spatial column, even across different parent groups. Left/right changes depth. Moving left remembers the child just left, so moving right retraces the same path across multiple depths. Moving up or down to another card clears this child-selection memory, including when returning to the previous sibling; Right then starts at the first child again. The same memory applies to folders, FABLE files, and the root cards within the open document. Moving Up/Down between explorer entries clears it too; pressing an arrow at a column boundary without changing selection preserves memory. Memory lasts only for the open document session and falls back to the first child if the remembered child was deleted or moved.
 
 ### Movement
 
@@ -174,16 +176,18 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - In navigation mode, Tab+Right → child
 - In navigation mode, Tab+Left → wrap the current level in a new parent
 - In navigation mode on a folder context card, Ctrl/Cmd+Right creates a new untitled `.fable` file in that folder.
-- New cards start as a single empty level-one heading line with no trailing body line
+- Newly generated siblings, children, parents, and the first card in a new document all default to normal paragraph text.
 
 ### Clipboard
 
 - In navigation mode on a writing card, Cmd/Ctrl+C copies only the active card's content.
 - In navigation mode on a writing card, Cmd/Ctrl+X cuts the active card plus its full descendant subtree and removes that subtree immediately.
 - Cutting the final remaining root card keeps the document valid by clearing that root card and removing its children.
-- In navigation mode, Cmd/Ctrl+V pastes a Fablecraft card payload only into an empty leaf writing card.
-- Pasting copied content fills the empty target card without creating children.
-- Pasting a cut subtree maps the pasted root onto the empty target card and recreates the cut children below it with new card ids.
+- In navigation mode, Cmd/Ctrl+V pastes only valid Fablecraft card payloads.
+- Pasting onto an empty leaf writing card fills that card in place.
+- Pasting onto a writing card that already has content or children creates a new sibling card directly below it and pastes into that new card.
+- Pasting copied content preserves the source card's rich formatting and does not create children.
+- Pasting a cut subtree maps the pasted root onto the in-place or newly created target card and recreates the cut children below it with new card ids.
 - Card clipboard payloads work across `.fable` documents through the system clipboard while each document keeps its own undo history.
 - Folder and `.fable` explorer context cards ignore card clipboard commands.
 - Editing mode keeps normal text cut, copy, and paste behavior inside the active editor.
@@ -202,9 +206,10 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - ArrowRight at the end of a card opens the first child in edit mode at the start of that card
 - In editing mode, Tab+Arrow keys move between nearby cards, place the caret at the end of the destination card, and stay in edit mode
 - In editing mode, Tab+Arrow keys create a card in the pointed direction when no nearby destination card exists
-- Enter in an empty new-card heading converts the single heading line to regular body text instead of creating another card
+- Enter in an empty Markdown heading converts that heading to regular body text instead of creating another card
 - Enter in a written heading keeps the heading intact and starts a regular body-text line below it
 - Double Enter → new card below
+- When Enter completes a blank-paragraph divide within a card, move all content below the divide into the new sibling below, preserve its formatting, and keep editing with the cursor at the start of that lower section.
 - Tab+Enter → split at line
 - markdown shortcuts render into rich text, including visible headings and lists
 - leaving a card removes any trailing empty line from that card
@@ -251,7 +256,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - dark theme cards use lighter box surfaces instead of shadows; the selected editing card becomes lighter again
 - dark theme card number labels use a light token so labels such as `A01` remain visible
 - immediate parent aligns vertically with the active card
-- the first immediate child is vertically centered on the active card, and later children stack below it even when other child groups share that column
+- the remembered immediate child (otherwise the first child) is vertically centered on the active card; siblings stack above and below it in order, even when other child groups share that column. Remembered deeper return paths retain their alignment during horizontal navigation
 - first children of other visible parent groups in the same child column stay as close as possible to the parent's visible top-aligned child slot whenever they can do so without overlapping the active child group or reserved empty child slot, with later children stacked directly below that first child
 - anchoring the active child group must not reorder neighboring sibling subtrees in that same child column
 - when the active card has no children, the child column still reserves a full empty slot centered on the active card so neighboring sibling subtrees cannot visually read as its children
@@ -275,6 +280,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - height is tracked per card
 - cards retain their measured height in both navigation and editing, and preview heights remeasure after content changes
 - height measurement follows the full rendered card surface so selection does not change wrapping or sibling spacing
+- Active cards shrink to their current content after text is removed or split; an earlier height or initial estimate must not leave blank space below the text beyond the normal padding and minimum card height.
 - the active card keeps the same content box and text reflow between navigation and edit mode
 - cards keep generous internal padding without changing footprint across modes
 - card content padding is expanded by 10px to increase breathing room
@@ -345,6 +351,7 @@ Document:
 - Open Recent
 - Import Markdown
 - Export Level (MD / HTML)
+- Convert Card to Document
 
 Structure:
 
@@ -482,9 +489,12 @@ All UI values must be configurable tokens.
 
 ## 12. Startup Behavior
 
+- show the bottom beta notice until the user dismisses it with ×; dismissal is remembered locally across new windows and app restarts, for all documents, and is not reset by appearance settings
+
 - always show the centered startup panel instead of auto-reopening a document
 - show Open Recent when recent documents exist
 - Open Recent presents up to five `.fable` files ordered by recency
+- Before showing recent files at startup or opening Open Recent, check that every saved path still points to a file. Remove missing files and directory paths from saved history, preserving recency order. Recheck each time Open Recent is opened.
 - always show:
   - New
   - Open
@@ -520,6 +530,10 @@ Export:
 - export targets the currently selected level
 - export filename defaults to the document name
 - markdown and html outputs separate cards with clear level separators
+
+Card conversion:
+
+- Convert Card to Document opens a save dialog like New Document, creates a new `.fable` document from the selected card and all descendants, removes that subtree from the source document, keeps the source valid by clearing the final root card when necessary, then opens the new document.
 
 ---
 
@@ -631,6 +645,7 @@ Card identity:
 - The numbering is present in workspace cards and search results to make navigation and discussion easier without introducing titles.
 Settings clarity:
 - The settings dialog must make keyboard focus obvious at the row level, so users can tell which setting is currently targeted before changing values.
+- Exactly one setting row shows a chevron, matching the row targeted by keyboard changes; moving selection removes the previous chevron immediately.
 - Inline setting choices should read as tactile pill controls rather than plain text buttons.
 - Titled overlays should use a subtle full-width divider under the heading so panels feel structured without introducing heavy dark borders.
 - The shortcuts and command list panels should share the same soft, shadow-led overlay language as Settings and Search rather than using separate card-grid styling.
@@ -653,3 +668,10 @@ Editing behavior:
 - Escape or in-editor arrow navigation away from an empty card should remove that abandoned card, including root-level cards, unless it is the final remaining card in the whole tree.
 - Backspace should delete an empty root-level card when other cards still exist; only the final remaining card in the whole tree is protected, and deleting it clears its content.
 - On the final remaining card, `Escape` should not leave edit mode while the card is still empty.
+
+### Document Trash cleanup
+
+- If moving a document to Trash fails, the confirmation dialog shows the system error and document path beneath the safety message so the failure can be diagnosed.
+- On macOS, if the native Trash operation fails, Fablecraft asks Finder to move the document to Trash. This fallback may prompt for permission to control Finder; if it also fails, the dialog shows both errors. Neither method permanently deletes the file.
+- Trashed documents disappear from the tree and recent-document list. Trashing the open document clears its cached contents and history and returns to startup; trashing another document keeps the current document open.
+- On macOS, restore a trashed document by dragging it out of Trash and opening it again. The native Trash API may not provide Finder's Put Back action.

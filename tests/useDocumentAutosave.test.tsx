@@ -58,6 +58,22 @@ describe("useDocumentAutosave", () => {
     resetDocumentStore();
   });
 
+  it("ignores an in-flight save failure after clearing a trashed document", async () => {
+    let rejectSave!: (reason: Error) => void;
+    saveDocumentSnapshotAtPath.mockImplementation(() => new Promise((_, reject) => { rejectSave = reject; }));
+    const root = createRoot(document.createElement("div"));
+    useDocumentStore.getState().hydrateSnapshot(makeDocumentSnapshot());
+    useDocumentStore.setState({ dirty: true });
+    await act(async () => { root.render(<TestHarness />); });
+    await act(async () => { vi.advanceTimersByTime(450); });
+    await act(async () => { useDocumentStore.getState().clearDocument(); });
+    await act(async () => { rejectSave(new Error("File moved to Trash")); });
+    expect(useDocumentStore.getState().snapshot).toBeNull();
+    expect(useDocumentStore.getState().saveState).toBe("idle");
+    expect(useDocumentStore.getState().errorMessage).toBeNull();
+    await act(async () => { root.unmount(); });
+  });
+
   it("marks the document saved after a successful autosave cycle", async () => {
     saveDocumentSnapshotAtPath.mockResolvedValue({
       revisionId: "rev-success",

@@ -3,6 +3,7 @@ import {
   createCardCopyPayload,
   createCardCutPayload,
   pasteCardClipboardPayload,
+  pasteCardClipboardPayloadWithResult,
   removeCutSubtree,
 } from "../src/domain/document/clipboard";
 import { contentJsonForPlainText } from "../src/domain/document/content";
@@ -11,6 +12,25 @@ import { createChildCard } from "../src/domain/document/tree";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 describe("document card clipboard operations", () => {
+  const formattedContentJson = JSON.stringify({
+    content: [
+      {
+        attrs: { level: 1 },
+        content: [{ text: "Metacognition", type: "text" }],
+        type: "heading",
+      },
+      {
+        content: [
+          { text: "Can a robot be ", type: "text" },
+          { marks: [{ type: "bold" }], text: "aware", type: "text" },
+          { text: " of its own knowledge", type: "text" },
+        ],
+        type: "paragraph",
+      },
+    ],
+    type: "doc",
+  });
+
   it("copies only the selected card content", () => {
     const seedSnapshot = createChildCard(makeDocumentSnapshot(), "card-a", "card-a-1");
     const snapshot = {
@@ -86,6 +106,44 @@ describe("document card clipboard operations", () => {
     ).toBe(contentJsonForPlainText("Copied beat"));
   });
 
+  it("pastes card content into a new sibling below an occupied target", () => {
+    const sourceSnapshot = {
+      ...makeDocumentSnapshot(),
+      contents: makeDocumentSnapshot().contents.map((content) =>
+        content.cardId === "card-a"
+          ? { ...content, contentJson: formattedContentJson }
+          : content,
+      ),
+    };
+    const occupiedSnapshot = {
+      ...makeDocumentSnapshot(),
+      contents: makeDocumentSnapshot().contents.map((content) =>
+        content.cardId === "card-b"
+          ? { ...content, contentJson: contentJsonForPlainText("Occupied beat") }
+          : content,
+      ),
+    };
+    const payload = createCardCopyPayload(sourceSnapshot, "card-a");
+    const result = pasteCardClipboardPayloadWithResult(
+      occupiedSnapshot,
+      "card-b",
+      payload,
+      () => "card-new",
+    );
+    const rootChildren = result.snapshot.cards
+      .filter((card) => card.parentId === "card-root")
+      .sort((left, right) => left.orderIndex - right.orderIndex);
+
+    expect(result.pastedRootCardId).toBe("card-new");
+    expect(rootChildren.map((card) => card.id)).toEqual(["card-a", "card-b", "card-new"]);
+    expect(
+      result.snapshot.contents.find((content) => content.cardId === "card-b")?.contentJson,
+    ).toBe(contentJsonForPlainText("Occupied beat"));
+    expect(
+      result.snapshot.contents.find((content) => content.cardId === "card-new")?.contentJson,
+    ).toBe(formattedContentJson);
+  });
+
   it("pastes a subtree onto the target card and remaps descendant ids", () => {
     let sourceSnapshot = createChildCard(makeDocumentSnapshot(), "card-a", "card-a-1");
     sourceSnapshot = createChildCard(sourceSnapshot, "card-a-1", "card-a-1-a");
@@ -134,28 +192,57 @@ describe("document card clipboard operations", () => {
     ).toBe(contentJsonForPlainText("Moved grandchild"));
   });
 
-  it("rejects non-empty targets and targets with children", () => {
-    const payload = createCardCopyPayload(makeDocumentSnapshot(), "card-a");
-    const nonEmptySnapshot = {
-      ...makeDocumentSnapshot(),
-      contents: makeDocumentSnapshot().contents.map((content) =>
-        content.cardId === "card-b"
-          ? { ...content, contentJson: contentJsonForPlainText("Occupied") }
-          : content,
-      ),
-    };
+  it("pastes a subtree into a new sibling below a structural target", () => {
+    let sourceSnapshot = createChildCard(makeDocumentSnapshot(), "card-a", "card-a-1");
     const targetWithChildrenSnapshot = createChildCard(
       makeDocumentSnapshot(),
       "card-b",
       "card-b-1",
     );
+    sourceSnapshot = {
+      ...sourceSnapshot,
+      contents: sourceSnapshot.contents.map((content) => {
+        if (content.cardId === "card-a") {
+          return { ...content, contentJson: contentJsonForPlainText("Moved root") };
+        }
 
-    expect(() =>
-      pasteCardClipboardPayload(nonEmptySnapshot, "card-b", payload, () => "card-new"),
-    ).toThrow("Paste target must be an empty card.");
-    expect(() =>
-      pasteCardClipboardPayload(targetWithChildrenSnapshot, "card-b", payload, () => "card-new"),
-    ).toThrow("Paste target must not already have children.");
+        if (content.cardId === "card-a-1") {
+          return { ...content, contentJson: contentJsonForPlainText("Moved child") };
+        }
+
+        return content;
+      }),
+    };
+    const payload = createCardCutPayload(sourceSnapshot, "card-a");
+    const ids = ["card-new-root", "card-new-child"];
+
+    const nextSnapshot = pasteCardClipboardPayload(
+      targetWithChildrenSnapshot,
+      "card-b",
+      payload,
+      () => ids.shift() ?? "unexpected",
+    );
+    const rootChildren = nextSnapshot.cards
+      .filter((card) => card.parentId === "card-root")
+      .sort((left, right) => left.orderIndex - right.orderIndex);
+
+    expect(rootChildren.map((card) => card.id)).toEqual([
+      "card-a",
+      "card-b",
+      "card-new-root",
+    ]);
+    expect(
+      nextSnapshot.contents.find((content) => content.cardId === "card-b")?.contentJson,
+    ).toBe(EMPTY_EDITOR_DOCUMENT_JSON);
+    expect(
+      nextSnapshot.contents.find((content) => content.cardId === "card-new-root")?.contentJson,
+    ).toBe(contentJsonForPlainText("Moved root"));
+    expect(
+      nextSnapshot.cards.find((card) => card.id === "card-new-child")?.parentId,
+    ).toBe("card-new-root");
+    expect(
+      nextSnapshot.contents.find((content) => content.cardId === "card-new-child")?.contentJson,
+    ).toBe(contentJsonForPlainText("Moved child"));
   });
 
   it("keeps one empty root when cutting the final root card", () => {

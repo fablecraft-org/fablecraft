@@ -8,6 +8,7 @@ import { useAppStore } from "../state/appStore";
 interface StartupPanelProps {
   onOpenGettingStarted?: (() => void) | null;
   onOpenRecentDocument?: ((path: string) => void) | null;
+  onRefreshRecentDocuments?: (() => Promise<string[] | null>) | null;
   onRecentDocumentsChange?: ((paths: string[]) => void) | null;
   recentDocumentPaths?: string[];
 }
@@ -70,6 +71,7 @@ export function StartupPanel({
   onOpenGettingStarted = null,
   onOpenRecentDocument = null,
   onRecentDocumentsChange = null,
+  onRefreshRecentDocuments = null,
   recentDocumentPaths = [],
 }: StartupPanelProps) {
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -138,8 +140,14 @@ export function StartupPanel({
         key: "open-recent",
         label: "Open Recent",
         onSelect: () => {
-          setSelectedRecentIndex(0);
-          setView("recent");
+          void (async () => {
+            const paths = onRefreshRecentDocuments
+              ? await onRefreshRecentDocuments()
+              : recentDocumentPaths;
+            if (!paths?.length) return;
+            setSelectedRecentIndex(0);
+            setView("recent");
+          })();
         },
       });
     }
@@ -171,7 +179,7 @@ export function StartupPanel({
     }
 
     return rows;
-  }, [onOpenGettingStarted, onOpenRecentDocument, recentDocumentPaths]);
+  }, [onOpenGettingStarted, onOpenRecentDocument, onRefreshRecentDocuments, recentDocumentPaths]);
 
   const recentRows = useMemo<StartupRow[]>(() => {
     const rows: StartupRow[] = recentDocumentPaths.slice(0, 5).map((path) => ({

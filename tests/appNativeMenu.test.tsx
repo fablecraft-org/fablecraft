@@ -3,22 +3,31 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/app/App";
 import { useAppStore } from "../src/state/appStore";
+import { useDocumentStore } from "../src/state/documentStore";
+import { useInteractionStore } from "../src/state/interactionStore";
+import { useSettingsStore } from "../src/state/settingsStore";
+import { contentJsonForPlainText } from "../src/domain/document/content";
 import {
   FRONTEND_MENU_ACTION_EVENT,
   NATIVE_MENU_ACTION_EVENT,
   type NativeMenuAction,
 } from "../src/lib/nativeMenu";
 import { OPEN_DOCUMENTS_EVENT } from "../src/lib/openDocuments";
+import { rememberLastDocumentPath, readRecentDocumentPaths } from "../src/storage/lastDocument";
+import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 const mocks = vi.hoisted(() => ({
+  existingDocumentPaths: vi.fn(),
   enableClaudeDesktopIntegration: vi.fn(),
   enableCodexIntegration: vi.fn(),
   forceSaveCurrentDocument: vi.fn(),
   listen: vi.fn(),
   loadLocalIntegrationStatuses: vi.fn(),
   openDocumentAtPath: vi.fn(),
+  promptForConvertedCardDocument: vi.fn(),
   promptForNewDocument: vi.fn(),
   promptForOpenDocument: vi.fn(),
+  saveDocumentSnapshotAtPath: vi.fn(),
   unlisten: vi.fn(),
 }));
 
@@ -29,11 +38,19 @@ let nativeOpenDocumentCallback:
   | ((event: { payload: { paths: string[] } }) => void)
   | null = null;
 
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => false,
+  invoke: (command: string, args: { paths: string[] }) =>
+    command === "existing_document_paths" ? mocks.existingDocumentPaths(args.paths) : Promise.resolve([]),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: mocks.listen,
 }));
 
 vi.mock("../src/app/documentActions", () => ({
+  promptForConvertedCardDocument: (defaultPath?: string) =>
+    mocks.promptForConvertedCardDocument(defaultPath),
   promptForNewDocument: () => mocks.promptForNewDocument(),
   promptForOpenDocument: () => mocks.promptForOpenDocument(),
 }));
@@ -52,8 +69,18 @@ vi.mock("../src/storage/documents", () => ({
   openDocumentAtPath: (path: string) => mocks.openDocumentAtPath(path),
 }));
 
+vi.mock("../src/storage/documentSnapshots", () => ({
+  saveDocumentSnapshotAtPath: (...args: unknown[]) =>
+    mocks.saveDocumentSnapshotAtPath(...args),
+}));
+
 vi.mock("../src/components/DocumentWorkspace", () => ({
-  DocumentWorkspace: () => <div data-testid="document-workspace" />,
+  DocumentWorkspace: ({ onDocumentDeleted }: { onDocumentDeleted: (path: string) => void }) => (
+    <div data-testid="document-workspace">
+      <button data-testid="trash-current" onClick={() => onDocumentDeleted(useAppStore.getState().activeDocument!.path)} />
+      <button data-testid="trash-other" onClick={() => onDocumentDeleted("/tmp/other.fable")} />
+    </div>
+  ),
 }));
 
 vi.mock("../src/components/FeedbackDialog", () => ({
@@ -100,6 +127,7 @@ describe("App native menu handling", () => {
         IS_REACT_ACT_ENVIRONMENT?: boolean;
       }
     ).IS_REACT_ACT_ENVIRONMENT = true;
+    mocks.existingDocumentPaths.mockReset().mockImplementation((paths: string[]) => Promise.resolve(paths));
     nativeMenuCallback = null;
     nativeOpenDocumentCallback = null;
     mocks.enableClaudeDesktopIntegration.mockReset();
@@ -108,8 +136,10 @@ describe("App native menu handling", () => {
     mocks.listen.mockReset();
     mocks.loadLocalIntegrationStatuses.mockReset();
     mocks.openDocumentAtPath.mockReset();
+    mocks.promptForConvertedCardDocument.mockReset();
     mocks.promptForNewDocument.mockReset();
     mocks.promptForOpenDocument.mockReset();
+    mocks.saveDocumentSnapshotAtPath.mockReset();
     mocks.unlisten.mockReset();
     mocks.listen.mockImplementation(
       async (
@@ -156,7 +186,25 @@ describe("App native menu handling", () => {
         path,
       }),
     );
+    mocks.saveDocumentSnapshotAtPath.mockResolvedValue({
+      revisionId: "revision-1",
+      savedAtMs: 10,
+    });
     resetAppStore();
+    useDocumentStore.setState({
+      dirty: false,
+      editingFuture: [],
+      editingPast: [],
+      errorMessage: null,
+      lastSavedAtMs: null,
+      navigationFuture: [],
+      navigationPast: [],
+      saveState: "idle",
+      snapshot: null,
+    });
+    useInteractionStore.setState({
+      activeCardId: null,
+    });
   });
 
   afterEach(() => {
@@ -167,6 +215,43 @@ describe("App native menu handling", () => {
     ).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
     document.body.innerHTML = "";
     resetAppStore();
+    useDocumentStore.setState({
+      snapshot: null,
+    });
+    useInteractionStore.setState({
+      activeCardId: null,
+    });
+  });
+
+  it.each([true, false])("cleans up a trashed document (active=%s)", async (active) => {
+    window.localStorage.clear();
+    const snapshot = makeDocumentSnapshot();
+    rememberLastDocumentPath("/tmp/other.fable");
+    rememberLastDocumentPath(snapshot.summary.path);
+    mocks.promptForOpenDocument.mockResolvedValue(snapshot.summary);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<App />); });
+    await act(async () => { dispatchNativeMenuAction("open-document"); });
+    await act(async () => {
+      useDocumentStore.getState().hydrateSnapshot(snapshot);
+      useDocumentStore.getState().applyNavigationChange((value) => value);
+      useInteractionStore.getState().setActiveCardId("card-root");
+    });
+    const storedSnapshot = useDocumentStore.getState().snapshot;
+    await act(async () => {
+      (container.querySelector(active ? '[data-testid="trash-current"]' : '[data-testid="trash-other"]') as HTMLButtonElement).click();
+    });
+    expect(readRecentDocumentPaths()).not.toContain(active ? snapshot.summary.path : "/tmp/other.fable");
+    expect(useAppStore.getState().activeDocument).toEqual(active ? null : snapshot.summary);
+    expect(useDocumentStore.getState().snapshot).toEqual(active ? null : storedSnapshot);
+    if (active) {
+      expect(useDocumentStore.getState().navigationPast).toEqual([]);
+      expect(useDocumentStore.getState().dirty).toBe(false);
+      expect(useInteractionStore.getState().activeCardId).toBeNull();
+    }
+    await act(async () => { root.unmount(); });
   });
 
   it("keeps one native menu listener after opening a document", async () => {
@@ -232,6 +317,92 @@ describe("App native menu handling", () => {
     });
   });
 
+  it("converts the selected card subtree into a new document from the command palette", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const snapshot = {
+      ...makeDocumentSnapshot(),
+      contents: makeDocumentSnapshot().contents.map((content) =>
+        content.cardId === "card-a"
+          ? { ...content, contentJson: contentJsonForPlainText("Extracted scene") }
+          : content,
+      ),
+    };
+
+    mocks.promptForConvertedCardDocument.mockResolvedValue({
+      documentId: "doc-2",
+      name: "Extracted",
+      openedAtMs: 2,
+      path: "/tmp/extracted.fable",
+    });
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    await act(async () => {
+      useAppStore.setState({
+        activeDocument: snapshot.summary,
+        mode: "navigation",
+        notice: null,
+        screen: "workspace",
+      });
+      useDocumentStore.getState().hydrateSnapshot(snapshot);
+      useInteractionStore.setState({
+        activeCardId: "card-a",
+      });
+    });
+
+    await act(async () => {
+      dispatchNativeMenuAction("command-palette");
+    });
+
+    const commandInput = container.querySelector("input") as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        commandInput,
+        "convert",
+      );
+      commandInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      const convertButton = Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent === "Convert Card to Document",
+      );
+      convertButton?.click();
+    });
+
+    expect(mocks.promptForConvertedCardDocument).toHaveBeenCalledWith(
+      "Extracted scene.fable",
+    );
+    expect(mocks.saveDocumentSnapshotAtPath).toHaveBeenCalledTimes(2);
+    expect(mocks.saveDocumentSnapshotAtPath.mock.calls[0][0]).toBe(
+      "/tmp/extracted.fable",
+    );
+    expect(mocks.saveDocumentSnapshotAtPath.mock.calls[0][1].documentId).toBe(
+      "doc-2",
+    );
+    expect(mocks.saveDocumentSnapshotAtPath.mock.calls[0][1].cards.map(
+      (card: { id: string; parentId: string | null }) => [card.id, card.parentId],
+    )).toEqual([["card-a", null]]);
+    expect(mocks.saveDocumentSnapshotAtPath.mock.calls[1][0]).toBe(
+      "/tmp/story.fable",
+    );
+    expect(mocks.saveDocumentSnapshotAtPath.mock.calls[1][1].cards.some(
+      (card: { id: string }) => card.id === "card-a",
+    )).toBe(false);
+    expect(useAppStore.getState().activeDocument?.documentId).toBe("doc-2");
+    expect(useDocumentStore.getState().snapshot?.summary.documentId).toBe("doc-2");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("opens a .fable document from a native open-file event", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -250,6 +421,42 @@ describe("App native menu handling", () => {
     ).toBeLessThan(mocks.openDocumentAtPath.mock.invocationCallOrder[0]);
     expect(mocks.openDocumentAtPath).toHaveBeenCalledWith("/tmp/finder-story.fable");
     expect(useAppStore.getState().activeDocument?.path).toBe("/tmp/finder-story.fable");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("remembers beta notice dismissal across fresh app mounts and preference resets", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    let root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    expect(container.textContent).toContain("This is a beta version of Fablecraft.");
+    const dismiss = container.querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]');
+    expect(dismiss).not.toBeNull();
+
+    await act(async () => {
+      dismiss!.click();
+    });
+
+    expect(container.textContent).not.toContain("This is a beta version of Fablecraft.");
+
+    await act(async () => {
+      root.unmount();
+    });
+    useSettingsStore.getState().resetPreferences();
+    root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    expect(container.textContent).not.toContain("This is a beta version of Fablecraft.");
 
     await act(async () => {
       root.unmount();
@@ -372,6 +579,34 @@ describe("App native menu handling", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("hides recent paths until checked and rechecks before opening the recent panel", async () => {
+    rememberLastDocumentPath("/tmp/removed.fable");
+    rememberLastDocumentPath("/tmp/present.fable");
+    let finishCheck!: (paths: string[]) => void;
+    mocks.existingDocumentPaths.mockImplementationOnce(() => new Promise<string[]>((resolve) => {
+      finishCheck = resolve;
+    }));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<App />); });
+    expect(container.textContent).not.toContain("Open Recent");
+    await act(async () => { finishCheck(["/tmp/present.fable"]); });
+    expect(container.textContent).toContain("Open Recent");
+    expect(readRecentDocumentPaths()).toEqual(["/tmp/present.fable"]);
+
+    mocks.existingDocumentPaths.mockResolvedValueOnce([]);
+    const openRecent = Array.from(container.querySelectorAll("button")).find((node) =>
+      node.textContent?.includes("Open Recent"),
+    )!;
+    await act(async () => { openRecent.click(); });
+    expect(container.textContent).not.toContain("present");
+    expect(readRecentDocumentPaths()).toEqual([]);
+    expect(mocks.openDocumentAtPath).not.toHaveBeenCalled();
+    await act(async () => { root.unmount(); });
+    container.remove();
   });
 
   it("opens recent documents from the native menu", async () => {

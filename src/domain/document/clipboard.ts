@@ -1,7 +1,7 @@
 import { EMPTY_EDITOR_DOCUMENT_JSON } from "./editorDocument";
 import { cardContent, isContentEffectivelyEmpty, replaceCardContent } from "./content";
 import { normalizeDocumentSnapshot } from "./serialization";
-import { deleteCardSubtree } from "./tree";
+import { createSiblingAfter, deleteCardSubtree } from "./tree";
 import type { CardRecord, DocumentSnapshot } from "./types";
 
 export const CARD_CLIPBOARD_MIME_TYPE = "application/x-fablecraft-card+json";
@@ -42,6 +42,11 @@ export interface CardSubtreeClipboardPayload extends BaseCardClipboardPayload {
 export type CardClipboardPayload =
   | CardContentClipboardPayload
   | CardSubtreeClipboardPayload;
+
+export interface PasteCardClipboardResult {
+  pastedRootCardId: string;
+  snapshot: DocumentSnapshot;
+}
 
 export function encodeCardClipboardPayload(payload: CardClipboardPayload) {
   return `${CARD_CLIPBOARD_TEXT_PREFIX}${JSON.stringify(payload)}`;
@@ -177,6 +182,45 @@ export function pasteCardClipboardPayload(
   payload: CardClipboardPayload,
   createCardId: () => string,
 ) {
+  return pasteCardClipboardPayloadWithResult(
+    snapshot,
+    targetCardId,
+    payload,
+    createCardId,
+  ).snapshot;
+}
+
+export function pasteCardClipboardPayloadWithResult(
+  snapshot: DocumentSnapshot,
+  targetCardId: string,
+  payload: CardClipboardPayload,
+  createCardId: () => string,
+): PasteCardClipboardResult {
+  const targetHasContent = !isContentEffectivelyEmpty(cardContent(snapshot, targetCardId));
+  const targetHasChildren = snapshot.cards.some((card) => card.parentId === targetCardId);
+  const shouldReplaceTarget = !targetHasContent && !targetHasChildren;
+  const pastedRootCardId = shouldReplaceTarget ? targetCardId : createCardId();
+  const pasteTargetSnapshot = shouldReplaceTarget
+    ? snapshot
+    : createSiblingAfter(snapshot, targetCardId, pastedRootCardId);
+
+  return {
+    pastedRootCardId,
+    snapshot: pasteCardClipboardPayloadIntoRoot(
+      pasteTargetSnapshot,
+      pastedRootCardId,
+      payload,
+      createCardId,
+    ),
+  };
+}
+
+function pasteCardClipboardPayloadIntoRoot(
+  snapshot: DocumentSnapshot,
+  targetCardId: string,
+  payload: CardClipboardPayload,
+  createCardId: () => string,
+) {
   const targetCard = cardById(snapshot, targetCardId);
 
   if (!targetCard) {
@@ -184,11 +228,11 @@ export function pasteCardClipboardPayload(
   }
 
   if (!isContentEffectivelyEmpty(cardContent(snapshot, targetCardId))) {
-    throw new Error("Paste target must be an empty card.");
+    throw new Error("Paste root must be an empty card.");
   }
 
   if (snapshot.cards.some((card) => card.parentId === targetCardId)) {
-    throw new Error("Paste target must not already have children.");
+    throw new Error("Paste root must not already have children.");
   }
 
   if (payload.kind === "content") {

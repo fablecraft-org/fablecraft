@@ -1,7 +1,11 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { promptForNewDocument, promptForOpenDocument } from "./documentActions";
+import {
+  promptForConvertedCardDocument,
+  promptForNewDocument,
+  promptForOpenDocument,
+} from "./documentActions";
 import { exportCurrentLevelToFile, importMarkdownDocument } from "./importExportActions";
 import { AppUpdateDialog } from "../components/AppUpdateDialog";
 import { CommandPalette, type CommandPaletteItem } from "../components/CommandPalette";
@@ -12,6 +16,12 @@ import { RecentDocumentsOverlay } from "../components/RecentDocumentsOverlay";
 import { SearchOverlay } from "../components/SearchOverlay";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { StartupPanel } from "../components/StartupPanel";
+import {
+  createDocumentFromCardSubtree,
+  defaultConvertedDocumentName,
+  removeConvertedCardFromSource,
+} from "../domain/document/cardDocumentConversion";
+import { toEditableDocumentSnapshot } from "../domain/document/serialization";
 import { mergeCardWithNextSibling, mergeCardWithPreviousSibling } from "../domain/document/tree";
 import {
   dispatchNativeMenuAction,
@@ -26,11 +36,13 @@ import {
 import {
   clearLastDocumentPath,
   forgetRecentDocumentPath,
-  readRecentDocumentPaths,
   rememberLastDocumentPath,
   replaceRecentDocumentPath,
 } from "../storage/lastDocument";
+import { refreshRecentDocumentPaths } from "../storage/recentDocuments";
 import { openDocumentAtPath } from "../storage/documents";
+import { isBetaNoticeDismissed, rememberBetaNoticeDismissal } from "../storage/betaNotice";
+import { saveDocumentSnapshotAtPath } from "../storage/documentSnapshots";
 import { forceSaveCurrentDocument } from "../storage/forceSave";
 import {
   enableClaudeDesktopIntegration,
@@ -94,7 +106,7 @@ export function App() {
   const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null);
   const [appUpdateErrorMessage, setAppUpdateErrorMessage] = useState<string | null>(null);
   const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateProgress | null>(null);
-  const [showBetaBar, setShowBetaBar] = useState(true);
+  const [showBetaBar, setShowBetaBar] = useState(() => !isBetaNoticeDismissed());
   const [recentDocumentPaths, setRecentDocumentPaths] = useState<string[]>([]);
   const nativeMenuActionHandlerRef = useRef<(action: NativeMenuAction) => void>(() => {});
   const openDocumentPathHandlerRef = useRef<(path: string) => void>(() => {});
@@ -114,6 +126,8 @@ export function App() {
   const applyNavigationChange = useDocumentStore(
     (state) => state.applyNavigationChange,
   );
+  const hydrateSnapshot = useDocumentStore((state) => state.hydrateSnapshot);
+  const markSaved = useDocumentStore((state) => state.markSaved);
   const activeCardId = useInteractionStore((state) => state.activeCardId);
   const setActiveCardId = useInteractionStore((state) => state.setActiveCardId);
   const activeSnapshot =
@@ -149,7 +163,7 @@ export function App() {
   }, [isSettingsOpen, theme]);
 
   useEffect(() => {
-    setRecentDocumentPaths(readRecentDocumentPaths());
+    void refreshRecentDocuments();
     setScreen("startup");
   }, [setScreen]);
 
@@ -253,9 +267,24 @@ export function App() {
     setSettingsOpen(true);
   }
 
-  function openRecentDocumentsOverlay() {
-    const nextRecentDocumentPaths = readRecentDocumentPaths();
-    setRecentDocumentPaths(nextRecentDocumentPaths);
+  async function refreshRecentDocuments() {
+    setRecentDocumentPaths([]);
+    try {
+      const paths = await refreshRecentDocumentPaths();
+      setRecentDocumentPaths(paths);
+      return paths;
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: noticeMessage(error, "Fablecraft could not check recent documents."),
+      });
+      return null;
+    }
+  }
+
+  async function openRecentDocumentsOverlay() {
+    const nextRecentDocumentPaths = await refreshRecentDocuments();
+    if (!nextRecentDocumentPaths) return;
 
     if (nextRecentDocumentPaths.length === 0) {
       setNotice({
@@ -508,6 +537,61 @@ export function App() {
     }
   }
 
+  async function handleConvertCardToDocument() {
+    if (!activeSnapshot || !activeDocument || !activeCardId || !selectedCard) {
+      return;
+    }
+
+    const sourceSnapshot = activeSnapshot;
+    const sourcePath = activeDocument.path;
+
+    try {
+      await forceSaveCurrentDocument();
+      const targetDocument = await promptForConvertedCardDocument(
+        defaultConvertedDocumentName(sourceSnapshot, activeCardId),
+      );
+
+      if (!targetDocument) {
+        return;
+      }
+
+      const targetSnapshot = createDocumentFromCardSubtree(
+        sourceSnapshot,
+        activeCardId,
+        targetDocument,
+      );
+      const sourceSnapshotAfterConversion = removeConvertedCardFromSource(
+        sourceSnapshot,
+        activeCardId,
+      );
+
+      const targetSaveResult = await saveDocumentSnapshotAtPath(
+        targetDocument.path,
+        toEditableDocumentSnapshot(targetSnapshot),
+      );
+      await saveDocumentSnapshotAtPath(
+        sourcePath,
+        toEditableDocumentSnapshot(sourceSnapshotAfterConversion),
+      );
+
+      setRecentDocumentPaths(rememberLastDocumentPath(targetDocument.path));
+      setDocument(targetDocument);
+      hydrateSnapshot(targetSnapshot);
+      markSaved(targetSaveResult, targetDocument.documentId);
+      setActiveCardId(activeCardId);
+      setMode("navigation");
+      setNotice({
+        tone: "info",
+        message: `Converted card to "${targetDocument.name}".`,
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: noticeMessage(error, "Fablecraft could not convert that card."),
+      });
+    }
+  }
+
   async function handleOpenRecentDocument(path: string) {
     if (!path) {
       return;
@@ -583,11 +667,15 @@ export function App() {
     if (nextRecentDocumentPaths.length === 0) {
       clearLastDocumentPath();
     }
-    setDocument(null);
-    setMode("navigation");
+    if (useAppStore.getState().activeDocument?.path === path) {
+      useDocumentStore.getState().clearDocument();
+      useInteractionStore.getState().setActiveCardId(null);
+      setDocument(null);
+      setMode("navigation");
+    }
     setNotice({
       tone: "info",
-      message: "Deleted document.",
+      message: "Document moved to Trash.",
     });
   }
 
@@ -995,6 +1083,15 @@ export function App() {
   }
 
   if (activeSnapshot) {
+    if (selectedCard) {
+      commandItems.push({
+        id: "convert-card-to-document",
+        keywords: ["card", "extract", "move", "subtree"],
+        label: "Convert Card to Document",
+        run: () => runPaletteAction(handleConvertCardToDocument),
+      });
+    }
+
     if (selectedCard && canMergeWithAbove) {
       commandItems.push({
         id: "merge-with-above",
@@ -1033,6 +1130,7 @@ export function App() {
             onOpenGettingStarted={() => {
               setHelpSheetMode("getting-started");
             }}
+            onRefreshRecentDocuments={refreshRecentDocuments}
             onOpenRecentDocument={(path) => void handleOpenRecentDocument(path)}
             onRecentDocumentsChange={setRecentDocumentPaths}
             recentDocumentPaths={recentDocumentPaths}
@@ -1156,7 +1254,10 @@ export function App() {
           <button
             aria-label="Dismiss"
             className="text-white/50 hover:text-white"
-            onClick={() => setShowBetaBar(false)}
+            onClick={() => {
+              rememberBetaNoticeDismissal();
+              setShowBetaBar(false);
+            }}
           >
             ✕
           </button>

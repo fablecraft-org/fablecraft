@@ -42,6 +42,17 @@ export function firstChildCardId(cards: CardRecord[], cardId: string) {
   return sortedChildren(cards, cardId)[0]?.id ?? null;
 }
 
+export function preferredChildCardId(
+  cards: CardRecord[],
+  cardId: string,
+  rememberedChildIds: Record<string, string>,
+) {
+  const rememberedId = rememberedChildIds[cardId];
+  return cards.some((card) => card.id === rememberedId && card.parentId === cardId)
+    ? rememberedId!
+    : firstChildCardId(cards, cardId);
+}
+
 export function previousSiblingCardId(cards: CardRecord[], cardId: string) {
   const currentCard = cards.find((card) => card.id === cardId);
 

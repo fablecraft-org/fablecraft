@@ -29,6 +29,21 @@ pub struct FableDirectory {
     parent_folder_path: Option<String>,
 }
 
+/// Check paths without opening SQLite files or changing the active document.
+#[tauri::command]
+pub fn existing_document_paths(paths: Vec<String>) -> Result<Vec<String>, AppErrorPayload> {
+    let mut existing = Vec::new();
+    for path in paths {
+        match fs::metadata(&path) {
+            Ok(metadata) if metadata.is_file() => existing.push(path),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(AppError::from(error).into()),
+        }
+    }
+    Ok(existing)
+}
+
 #[tauri::command]
 pub fn create_document(
     path: String,
@@ -61,13 +76,48 @@ pub fn create_untitled_document_in_directory(
 }
 
 #[tauri::command]
-pub fn delete_fable_document(path: String) -> Result<(), AppErrorPayload> {
-    let document_path = PathBuf::from(path);
+pub fn delete_fable_document(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<(), AppErrorPayload> {
+    trash_document(Path::new(&path), &state, |path| {
+        crate::document_trash::move_to_trash(path).map_err(|error| {
+            let details = format!("Path: {}\nSystem error: {error}", path.display());
+            eprintln!("[document_trash_failed] {details}");
+            AppError::storage(
+                "document_trash_failed",
+                "Could not move the document to Trash. The document has not been permanently deleted.",
+                Some(details),
+            ).into()
+        })
+    })?;
+    // Persist removal so restoring from Trash does not advertise an open session.
+    let _ = crate::session::forget_open_document(Path::new(&path));
+    Ok(())
+}
 
-    validate_deletable_fable_document_path(&document_path)?;
-    fs::remove_file(&document_path)
-        .map_err(AppError::from)
-        .map_err(AppErrorPayload::from)?;
+fn trash_document(
+    path: &Path,
+    state: &AppState,
+    move_to_trash: impl FnOnce(&Path) -> Result<(), AppErrorPayload>,
+) -> Result<(), AppErrorPayload> {
+    validate_deletable_fable_document_path(path)?;
+    let mut current = state
+        .current_document
+        .lock()
+        .expect("app state mutex should not be poisoned");
+    move_to_trash(path)?;
+    if current
+        .as_ref()
+        .is_some_and(|document| document.path == path)
+    {
+        *current = None;
+    }
+    state
+        .pending_open_document_paths
+        .lock()
+        .expect("app state mutex should not be poisoned")
+        .retain(|pending| Path::new(pending) != path);
     Ok(())
 }
 
@@ -234,6 +284,10 @@ fn list_fable_directory_for_document(
             let name = path.file_name()?.to_string_lossy().to_string();
 
             if path.is_dir() {
+                if name.starts_with('.') {
+                    return None;
+                }
+
                 return Some(FableDirectoryEntry {
                     kind: "folder".to_string(),
                     name,
@@ -428,9 +482,99 @@ fn update_app_state(state: &State<'_, AppState>, summary: &DocumentSummary) {
 
 #[cfg(test)]
 mod tests {
-    use super::{renamed_fable_document_path, validate_deletable_fable_document_path};
+    use super::{
+        existing_document_paths, list_fable_directory_for_document, renamed_fable_document_path,
+        validate_deletable_fable_document_path,
+    };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn recent_paths_include_only_existing_files_without_opening_them() {
+        let folder = temp_folder("recent-paths");
+        let present = folder.join("present.fable");
+        fs::write(&present, b"existence checks do not open SQLite").unwrap();
+        let paths = vec![
+            folder.join("missing.fable").to_string_lossy().into_owned(),
+            present.to_string_lossy().into_owned(),
+            folder.to_string_lossy().into_owned(),
+        ];
+        assert_eq!(
+            existing_document_paths(paths).unwrap(),
+            vec![present.to_string_lossy().into_owned()]
+        );
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn directory_listing_hides_dot_prefixed_folders() {
+        let folder = temp_folder("directory-visibility");
+        for name in ["Archive", "Notes.v2", ".git", ".private", ".hidden.fable"] {
+            fs::create_dir(folder.join(name)).unwrap();
+        }
+        for name in ["story.fable", "draft.FABLE", "notes.txt"] {
+            fs::write(folder.join(name), "").unwrap();
+        }
+
+        let listing =
+            list_fable_directory_for_document(folder.clone(), folder.join("story.fable")).unwrap();
+        let names: Vec<_> = listing
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, ["Archive", "Notes.v2", "draft.FABLE", "story.fable"]);
+
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn trash_success_clears_only_matching_open_document_and_queue() {
+        use crate::app_state::{AppState, OpenDocumentContext};
+        let folder = temp_folder("trash");
+        let path = folder.join("story.fable");
+        let destination = folder.join("recoverable.fable");
+        fs::write(&path, b"recoverable contents").unwrap();
+        let state = AppState::default();
+        *state.current_document.lock().unwrap() = Some(OpenDocumentContext {
+            document_id: "story".into(),
+            path: path.clone(),
+        });
+        *state.pending_open_document_paths.lock().unwrap() =
+            vec![path.to_string_lossy().into(), "other.fable".into()];
+        super::trash_document(&path, &state, |source| {
+            fs::rename(source, &destination).unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert!(state.current_document.lock().unwrap().is_none());
+        assert_eq!(
+            *state.pending_open_document_paths.lock().unwrap(),
+            vec!["other.fable"]
+        );
+        assert_eq!(fs::read(&destination).unwrap(), b"recoverable contents");
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn trash_failure_preserves_file_and_open_document() {
+        use crate::app_state::{AppState, OpenDocumentContext};
+        let folder = temp_folder("trash-failure");
+        let path = folder.join("story.fable");
+        fs::write(&path, b"contents").unwrap();
+        let state = AppState::default();
+        *state.current_document.lock().unwrap() = Some(OpenDocumentContext {
+            document_id: "story".into(),
+            path: path.clone(),
+        });
+        let result = super::trash_document(&path, &state, |_| {
+            Err(crate::error::AppError::invalid_input("trash_failed", "Trash unavailable").into())
+        });
+        assert!(result.is_err());
+        assert!(path.exists());
+        assert!(state.current_document.lock().unwrap().is_some());
+        fs::remove_dir_all(folder).unwrap();
+    }
 
     fn temp_folder(label: &str) -> std::path::PathBuf {
         let timestamp = SystemTime::now()

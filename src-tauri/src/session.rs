@@ -53,6 +53,15 @@ pub fn record_open_document(summary: &DocumentSummary) -> AppResult<()> {
     write_open_document_sessions(&session_file)
 }
 
+pub fn forget_open_document(path: &std::path::Path) -> AppResult<()> {
+    let mut sessions = read_open_document_sessions()?;
+    sessions
+        .open_documents
+        .retain(|session| std::path::Path::new(&session.document_path) != path);
+    sessions.updated_at_ms = current_time_ms();
+    write_open_document_sessions(&sessions)
+}
+
 pub fn read_open_document_sessions() -> AppResult<OpenDocumentSessionFile> {
     let path = session_file_path();
 

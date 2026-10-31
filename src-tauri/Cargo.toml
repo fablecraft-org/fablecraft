@@ -1,6 +1,6 @@
 [package]
 name = "fablecraft"
-version = "0.2.2"
+version = "0.3.0"
 description = "Fablecraft desktop application"
 authors = ["Codex"]
 edition = "2021"
@@ -24,5 +24,9 @@ tauri-plugin-dialog = "=2.6.0"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 time = "=0.3.36"
+trash = "=5.2.9"
 thiserror = "=2.0.9"
 uuid = { version = "=1.11.0", features = ["v4", "serde"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSDictionary", "NSError", "NSFileManager", "NSString", "NSURL"] }

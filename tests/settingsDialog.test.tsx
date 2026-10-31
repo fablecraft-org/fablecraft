@@ -102,7 +102,7 @@ describe("SettingsDialog", () => {
     expect(themeRow).toBeDefined();
     expect(fontRow).toBeDefined();
     expect(useSettingsStore.getState().preferences.theme).toBe("light");
-    expect(themeChevron?.style.opacity).toBe("1");
+    expect(themeChevron?.textContent).toBe(">");
 
     act(() => {
       themeRow?.focus();
@@ -117,7 +117,7 @@ describe("SettingsDialog", () => {
     expect(useSettingsStore.getState().preferences.theme).toBe("dark");
     expect(themeRow?.textContent).toContain("Dark");
     expect(themeRow?.dataset.active).toBe("true");
-    expect(themeChevron?.style.opacity).toBe("1");
+    expect(themeChevron?.textContent).toBe(">");
     expect(document.activeElement).toBe(themeRow);
 
     act(() => {
@@ -131,6 +131,67 @@ describe("SettingsDialog", () => {
 
     expect(document.activeElement).toBe(fontRow);
     expect(themeRow?.dataset.active).toBe("false");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("shows exactly one chevron matching the row changed after keyboard and pointer navigation", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(<SettingsDialog onClose={() => {}} />);
+    });
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>('section[data-testid^="setting-row-"]'),
+    );
+    const chevrons = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-testid$="-chevron"]'),
+    );
+    function expectOnlyChevron(index: number) {
+      expect(chevrons.filter((chevron) => chevron.textContent === ">")).toEqual([
+        chevrons[index],
+      ]);
+      expect(rows.filter((row) => row.dataset.active === "true")).toEqual([rows[index]]);
+      expect(document.activeElement).toBe(rows[index]);
+    }
+    function press(key: string) {
+      act(() => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }),
+        );
+      });
+    }
+
+    expectOnlyChevron(0);
+    // Move through every row and wrap in both directions without waiting for animation.
+    for (let index = 1; index <= rows.length; index += 1) {
+      press("ArrowDown");
+      expectOnlyChevron(index % rows.length);
+    }
+    press("ArrowUp");
+    expectOnlyChevron(6);
+
+    const before = { ...useSettingsStore.getState().preferences };
+    press("ArrowRight");
+    expect(useSettingsStore.getState().preferences).toEqual({
+      ...before,
+      scrollPan: "disabled",
+    });
+    expectOnlyChevron(6);
+
+    act(() => {
+      rows[1]!.querySelectorAll("button")[1]!.click();
+    });
+    expect(useSettingsStore.getState().preferences.font).toBe("sans");
+    expectOnlyChevron(1);
+    press("ArrowLeft");
+    expect(useSettingsStore.getState().preferences.font).toBe("serif");
+    expectOnlyChevron(1);
 
     act(() => {
       root.unmount();
@@ -167,7 +228,7 @@ describe("SettingsDialog", () => {
     expect(useSettingsStore.getState().preferences.theme).toBe("dark");
     expect(document.activeElement).toBe(themeRow);
     expect(themeRow?.dataset.active).toBe("true");
-    expect(themeChevron?.style.opacity).toBe("1");
+    expect(themeChevron?.textContent).toBe(">");
 
     act(() => {
       themeRow?.dispatchEvent(
@@ -230,7 +291,7 @@ describe("SettingsDialog", () => {
 
     expect(useSettingsStore.getState().preferences.theme).toBe("dark");
     expect(themeRow?.dataset.active).toBe("true");
-    expect(themeChevron?.style.opacity).toBe("1");
+    expect(themeChevron?.textContent).toBe(">");
     expect(document.activeElement).toBe(externalFocusTarget);
 
     act(() => {

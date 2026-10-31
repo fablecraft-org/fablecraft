@@ -53,6 +53,7 @@ vi.mock("../src/components/CardEditor", () => ({
     focusPlacement,
     isEditing,
     onCreateSiblingBelow,
+    onCreateBelow,
     onDeleteEmpty,
     onNavigateAbove,
     onNavigateChild,
@@ -62,6 +63,7 @@ vi.mock("../src/components/CardEditor", () => ({
     focusPlacement?: string | null;
     isEditing: boolean;
     onCreateSiblingBelow?: () => void;
+    onCreateBelow?: (splitContent: { before: string; after: string }) => void;
     onDeleteEmpty?: () => void;
     onNavigateAbove?: (placement?: "start" | "end") => boolean;
     onNavigateChild?: (placement?: "start" | "end") => boolean;
@@ -77,6 +79,10 @@ vi.mock("../src/components/CardEditor", () => ({
         data-testid="card-editor"
       />
       <button data-testid="card-editor-create-sibling-below" onClick={() => onCreateSiblingBelow?.()} type="button" />
+      <button data-testid="card-editor-divide" onClick={() => onCreateBelow?.({
+        before: contentJsonForPlainText("Above"),
+        after: contentJsonForPlainText("Below"),
+      })} type="button" />
       <button data-testid="card-editor-delete-empty" onClick={() => onDeleteEmpty?.()} type="button" />
       <button data-testid="card-editor-navigate-above" onClick={() => onNavigateAbove?.()} type="button" />
       <button data-testid="card-editor-navigate-child-end" onClick={() => onNavigateChild?.("end")} type="button" />
@@ -183,6 +189,7 @@ function resetStores() {
   });
   useInteractionStore.setState({
     activeCardId: null,
+    rememberedChildIds: {},
   });
   useSettingsStore.getState().resetPreferences();
 }
@@ -279,6 +286,192 @@ describe("DocumentWorkspace", () => {
     });
     document.body.innerHTML = "";
     resetStores();
+  });
+
+  it("remembers a document's root card and a folder's document until vertical navigation", async () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.summary.path = "/tmp/Fables/story.fable";
+    snapshot.cards.push({ documentId: "doc-1", id: "root-2", parentId: null, orderIndex: 1, type: "card" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("root-2");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    async function press(key: string) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      });
+    }
+    function explorer(label: string) {
+      return Array.from(container.querySelectorAll<HTMLElement>('[data-testid="directory-card"]'))
+        .find((card) => card.textContent === label);
+    }
+    await press("ArrowLeft");
+    await press("ArrowLeft");
+    expect(explorer("FABLEstory")?.style.top).toBe("calc(50% + 0px)");
+    await press("ArrowRight");
+    expect(explorer("FABLEstory")?.dataset.isActive).toBe("true");
+    await press("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("root-2");
+    await press("ArrowLeft");
+    await press("ArrowUp");
+    await press("ArrowDown");
+    await press("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-root");
+    await press("ArrowLeft");
+    await press("ArrowUp");
+    await press("ArrowDown");
+    await press("ArrowLeft");
+    // Leaving story horizontally establishes a fresh return target.
+    expect(explorer("FABLEstory")?.style.top).toBe("calc(50% + 0px)");
+    await press("ArrowRight");
+    expect(explorer("FABLEstory")?.dataset.isActive).toBe("true");
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  it("moves the lower section into a sibling, keeps editing at its start, and undoes the divide together", async () => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Above\n\nBelow"),
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-a");
+    useAppStore.setState({ mode: "editing" });
+    const originalSnapshot = useDocumentStore.getState().snapshot;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    await act(async () => {
+      (container.querySelector('[data-testid="card-editor-divide"]') as HTMLButtonElement).click();
+    });
+
+    const divided = useDocumentStore.getState().snapshot!;
+    const newCardId = useInteractionStore.getState().activeCardId!;
+    expect(divided.cards).toHaveLength(snapshot.cards.length + 1);
+    expect(divided.cards.find((card) => card.id === newCardId)).toMatchObject({
+      parentId: "card-root", orderIndex: 1,
+    });
+    expect(contentText(divided.contents.find((content) => content.cardId === "card-a")!.contentJson)).toBe("Above");
+    expect(contentText(divided.contents.find((content) => content.cardId === newCardId)!.contentJson)).toBe("Below");
+    expect(useAppStore.getState().mode).toBe("editing");
+    expect(container.querySelector('[data-testid="card-editor"]')?.getAttribute("data-focus-placement")).toBe("start");
+    await act(async () => { useDocumentStore.getState().undoNavigation(); });
+    expect(useDocumentStore.getState().snapshot).toEqual(originalSnapshot);
+    await act(async () => { useDocumentStore.getState().redoNavigation(); });
+    expect(useDocumentStore.getState().snapshot).toEqual(divided);
+    await act(async () => { root.unmount(); });
+  });
+
+  it("remembers nested folder children and restores a folder after ascending", async () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.summary.path = "/tmp/Fables/story.fable";
+    const listing = (folderPath: string, entries: { kind: "folder" | "document"; name: string; path: string }[], parentFolderPath: string | null) => ({
+      currentDocumentPath: snapshot.summary.path, entries, folderPath,
+      folderName: folderPath.split("/").pop()!, parentFolderPath,
+    });
+    const files = listing("/tmp/Fables", [
+      { kind: "folder", name: "Archive", path: "/tmp/Fables/Archive" },
+      { kind: "document", name: "story.fable", path: snapshot.summary.path },
+    ], "/tmp");
+    const archive = listing("/tmp/Fables/Archive", [
+      { kind: "folder", name: "First", path: "/tmp/Fables/Archive/First" },
+      { kind: "document", name: "Second.fable", path: "/tmp/Fables/Archive/Second.fable" },
+    ], "/tmp/Fables");
+    listCurrentDocumentDirectory.mockResolvedValue(files);
+    listFableDirectory.mockImplementation(async (path: string) =>
+      path === files.folderPath ? files : path === archive.folderPath ? archive : listing("/tmp", [
+        { kind: "folder", name: "Fables", path: "/tmp/Fables" },
+      ], "/"));
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    async function press(key: string) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      });
+    }
+    function explorer(label: string) {
+      return Array.from(container.querySelectorAll<HTMLElement>('[data-testid="directory-card"]'))
+        .find((card) => card.textContent === label);
+    }
+    await press("ArrowLeft");
+    await press("ArrowLeft");
+    await press("ArrowRight");
+    await press("ArrowUp");
+    await press("ArrowRight");
+    await press("ArrowDown");
+    expect(explorer("FABLESecond")?.dataset.isActive).toBe("true");
+    await press("ArrowLeft");
+    expect(explorer("FABLESecond")?.style.top).toBe("calc(50% + 0px)");
+    await press("ArrowLeft");
+    await press("ArrowLeft");
+    await press("ArrowRight");
+    expect(explorer("FOLDERFables")?.dataset.isActive).toBe("true");
+    await press("ArrowRight");
+    expect(explorer("FOLDERArchive")?.dataset.isActive).toBe("true");
+    await press("ArrowRight");
+    expect(explorer("FOLDERArchive")?.dataset.isActive).toBe("true");
+    await press("ArrowRight");
+    expect(explorer("FABLESecond")?.dataset.isActive).toBe("true");
+    await press("ArrowLeft");
+    await press("ArrowDown");
+    await press("ArrowUp");
+    await press("ArrowRight");
+    expect(explorer("FOLDERFirst")?.dataset.isActive).toBe("true");
+    await press("ArrowLeft");
+    await act(async () => { useInteractionStore.getState().rememberChild("folder:/tmp/Fables/Archive", "/deleted.fable"); });
+    await press("ArrowRight");
+    expect(explorer("FOLDERFirst")?.dataset.isActive).toBe("true");
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  it("retraces horizontal movement and resets child alignment after vertical movement", async () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      { documentId: "doc-1", id: "root-2", parentId: null, orderIndex: 1, type: "card" },
+      { documentId: "doc-1", id: "b1", parentId: "card-b", orderIndex: 0, type: "card" },
+      { documentId: "doc-1", id: "b2", parentId: "card-b", orderIndex: 1, type: "card" },
+    );
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("b2");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    async function press(key: string) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      });
+    }
+    await press("ArrowLeft");
+    await press("ArrowLeft");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-root");
+    const rememberedPreview = container.querySelector('[data-card-label="B02"]');
+    expect(rememberedPreview?.getAttribute("data-y")).toBe("0");
+    await press("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+    await press("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("b2");
+    await press("ArrowLeft");
+    await press("ArrowLeft");
+    await press("ArrowDown");
+    await press("ArrowUp");
+    expect(useInteractionStore.getState().rememberedChildIds).toEqual({});
+    await press("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    await act(async () => { root.unmount(); });
+    container.remove();
   });
 
   it("keeps the active card shell footprint stable between navigation and editing", async () => {
@@ -499,6 +692,12 @@ describe("DocumentWorkspace", () => {
 
     await act(async () => {});
 
+    // Horizontal return now selects story; explicitly move up to Archive.
+    for (let index = 0; index < 2; index += 1) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowUp" }));
+      });
+    }
     expect(container.textContent).toContain("Deep Notes");
     expect(container.textContent).toContain("archive-index");
     expect(container.textContent).not.toContain(".fable");
@@ -506,6 +705,105 @@ describe("DocumentWorkspace", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("shows and navigates the containing folder's siblings after moving left from a file", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "navigation", screen: "workspace" });
+    useInteractionStore.setState({ activeCardId: "card-root" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const currentDirectory = await listCurrentDocumentDirectory();
+    const parentDirectory = {
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "folder" as const, name: "Archive", path: "/tmp/Archive" },
+        { kind: "folder" as const, name: "Fables", path: "/tmp/Fables" },
+        { kind: "document" as const, name: "neighbour.fable", path: "/tmp/neighbour.fable" },
+      ],
+      folderName: "tmp",
+      folderPath: "/tmp",
+      parentFolderPath: "/",
+    };
+    listFableDirectory.mockImplementation(async (path: string) => {
+      if (path === "/tmp") return parentDirectory;
+      if (path === "/tmp/Archive") return {
+        ...currentDirectory,
+        entries: [],
+        folderName: "Archive",
+        folderPath: path,
+        parentFolderPath: "/tmp",
+      };
+      return currentDirectory;
+    });
+    const explorerCard = (label: string) => Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'),
+    ).find((card) => card.textContent === label);
+    const press = async (key: string) => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      });
+    };
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    await press("ArrowLeft");
+    await press("ArrowLeft");
+
+    expect(listFableDirectory).toHaveBeenCalledWith("/tmp");
+    expect(explorerCard("FOLDERFables")?.dataset.isActive).toBe("true");
+    expect(explorerCard("FOLDERFables")?.style.top).toBe("calc(50% + 0px)");
+    expect(explorerCard("FOLDERArchive")?.style.left).toBe("calc(50% + 0px)");
+    expect(explorerCard("FOLDERArchive")?.style.top).not.toBe("calc(50% + 0px)");
+    expect(explorerCard("FABLEneighbour")?.style.left).toBe("calc(50% + 0px)");
+    expect(explorerCard("FABLEneighbour")?.style.top).not.toBe("calc(50% + 0px)");
+    expect(explorerCard("FOLDERtmp")).toBeDefined();
+    expect(explorerCard("FABLEstory")).toBeDefined();
+
+    await press("ArrowUp");
+    expect(explorerCard("FOLDERArchive")?.dataset.isActive).toBe("true");
+    expect(explorerCard("FOLDERFables")).toBeDefined();
+    await press("ArrowDown");
+    expect(explorerCard("FOLDERFables")?.dataset.isActive).toBe("true");
+    await press("ArrowRight");
+    expect(explorerCard("FOLDERArchive")?.dataset.isActive).toBe("true");
+    await press("ArrowLeft");
+    await act(async () => { explorerCard("FABLEneighbour")?.click(); });
+    expect(explorerCard("FABLEneighbour")?.dataset.isActive).toBe("true");
+    expect(explorerCard("FOLDERFables")).toBeDefined();
+    await act(async () => { root.unmount(); });
+  });
+
+  it("keeps root folder navigation usable without a parent listing", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "navigation", screen: "workspace" });
+    useInteractionStore.setState({ activeCardId: "card-root" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    listCurrentDocumentDirectory.mockResolvedValue({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [{ kind: "document", name: "story.fable", path: snapshot.summary.path }],
+      folderName: "/",
+      folderPath: "/",
+      parentFolderPath: null,
+    });
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    for (const key of ["ArrowLeft", "ArrowLeft", "ArrowUp", "ArrowDown", "ArrowLeft"]) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      });
+    }
+    expect(listFableDirectory).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-is-active="true"][data-testid="directory-card"]')?.textContent).toBe("FOLDER/");
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+    expect(container.querySelector('[data-is-active="true"][data-testid="directory-card"]')?.textContent).toBe("FABLEstory");
+    await act(async () => { root.unmount(); });
   });
 
   it("recenters folder and fable cards after panning when navigating or clicking", async () => {
@@ -882,7 +1180,7 @@ describe("DocumentWorkspace", () => {
     });
 
     await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowUp" }));
     });
 
     expect(container.textContent).toContain("FABLEside-story");
@@ -891,9 +1189,9 @@ describe("DocumentWorkspace", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
     });
 
-    expect(container.textContent).toContain("Delete Document");
+    expect(container.textContent).toContain("Move Document to Trash");
     expect(container.textContent).toContain(
-      "Are you sure you want to delete \"side-story\" and all of it's contents?",
+      "Move \"side-story\" and all its contents to Trash?",
     );
     expect(container.textContent).not.toContain("This cannot be undone");
     expect(container.textContent).not.toContain("Escape cancels");
@@ -915,7 +1213,7 @@ describe("DocumentWorkspace", () => {
     });
 
     expect(deleteFableDocument).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain("Delete Document");
+    expect(container.textContent).not.toContain("Move Document to Trash");
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
@@ -939,14 +1237,14 @@ describe("DocumentWorkspace", () => {
 
     expect(deleteFableDocument).toHaveBeenCalledWith("/tmp/Fables/side-story.fable");
     expect(container.textContent).not.toContain("FABLEside-story");
-    expect(useAppStore.getState().notice?.message).toBe("Deleted \"side-story\".");
+    expect(useAppStore.getState().notice?.message).toBe("Moved \"side-story\" to Trash.");
 
     await act(async () => {
       root.unmount();
     });
   });
 
-  it("closes the workspace after deleting the current fable document", async () => {
+  it.each([true, false])("handles trashing the current document (success=%s)", async (success) => {
     const snapshot = {
       ...makeDocumentSnapshot(),
       summary: {
@@ -956,6 +1254,11 @@ describe("DocumentWorkspace", () => {
         path: "/tmp/Fables/story.fable",
       },
     };
+    if (!success) deleteFableDocument.mockRejectedValue({
+      code: "document_trash_failed",
+      message: "Trash unavailable",
+      details: "Path: /tmp/Fables/story.fable\nSystem error: Permission denied (os error 13)",
+    });
     const onDocumentDeleted = vi.fn();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -1001,7 +1304,7 @@ describe("DocumentWorkspace", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Backspace" }));
     });
 
-    expect(container.textContent).toContain("Delete Document");
+    expect(container.textContent).toContain("Move Document to Trash");
 
     await act(async () => {
       (
@@ -1010,7 +1313,15 @@ describe("DocumentWorkspace", () => {
     });
 
     expect(deleteFableDocument).toHaveBeenCalledWith(snapshot.summary.path);
-    expect(onDocumentDeleted).toHaveBeenCalledWith(snapshot.summary.path);
+    if (success) {
+      expect(onDocumentDeleted).toHaveBeenCalledWith(snapshot.summary.path);
+    } else {
+      expect(onDocumentDeleted).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-testid="delete-document-error"]')?.textContent).toBe(
+        "Trash unavailable\n\nPath: /tmp/Fables/story.fable\nSystem error: Permission denied (os error 13)",
+      );
+      expect(useDocumentStore.getState().snapshot?.summary.path).toBe(snapshot.summary.path);
+    }
 
     await act(async () => {
       root.unmount();
@@ -1166,7 +1477,7 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("balances active card padding around a new empty heading card", async () => {
+  it("uses normal text padding for a new empty card", async () => {
     const snapshot = replaceCardContent(makeDocumentSnapshot(), {
       cardId: "card-a",
       contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON,
@@ -1195,8 +1506,8 @@ describe("DocumentWorkspace", () => {
       '[data-testid="active-card-shell"]',
     ) as HTMLDivElement | null;
 
-    expect(activeShell?.style.paddingTop).toBe("33px");
-    expect(activeShell?.style.paddingBottom).toBe("33px");
+    expect(activeShell?.style.paddingTop).toBe("40px");
+    expect(activeShell?.style.paddingBottom).toBe("23px");
 
     await act(async () => {
       root.unmount();
@@ -1251,7 +1562,8 @@ describe("DocumentWorkspace", () => {
     ) as HTMLDivElement | null;
 
     expect(useInteractionStore.getState().activeCardId).toBe("card-a");
-    expect(navigationShell?.style.minHeight).toBe("1200px");
+    expect(navigationShell?.offsetHeight).toBe(1200);
+    expect(navigationShell?.style.minHeight).toBe("84px");
     expect(navigationShell?.style.top).toBe("48px");
     expect(navigationShell?.style.transform).toBe("translateX(-50%)");
 
@@ -2071,6 +2383,58 @@ describe("DocumentWorkspace", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("releases estimated and cached heights when the active content is shorter", async () => {
+    let naturalHeight = 240;
+    let notifyResize = () => {};
+    globalThis.ResizeObserver = class extends ResizeObserverMock {
+      constructor(callback: ResizeObserverCallback) {
+        super();
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+    } as unknown as typeof ResizeObserver;
+    // Model actual browser layout: min-height can stretch a short card, so
+    // measuring a surface constrained by its own cache cannot shrink it.
+    mockLayoutHeight((element) => element.dataset.testid === "active-card-shell"
+      ? Math.max(naturalHeight, Number.parseFloat(element.style.minHeight) || 0)
+      : 84);
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Text that wraps more tightly than estimated. ".repeat(25)),
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-a");
+    useAppStore.setState({ mode: "editing" });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    await act(async () => { notifyResize(); });
+    const shell = container.querySelector('[data-testid="active-card-shell"]') as HTMLElement;
+    const followingSiblingY = () => Number(Array.from(container.querySelectorAll<HTMLElement>('[data-testid="tree-card"]'))
+      .find((card) => card.dataset.cardLabel === "B02")?.dataset.y);
+    expect(shell.offsetHeight).toBe(240);
+    const originalSiblingY = followingSiblingY();
+
+    await act(async () => {
+      naturalHeight = 700;
+      notifyResize();
+    });
+    expect(shell.offsetHeight).toBe(700);
+    expect(followingSiblingY()).toBeGreaterThan(originalSiblingY);
+
+    await act(async () => {
+      naturalHeight = 120;
+      useDocumentStore.getState().updateSnapshot((current) => replaceCardContent(current, {
+        cardId: "card-a", contentJson: contentJsonForPlainText("Shortened after splitting or deleting text."),
+      }));
+      notifyResize();
+    });
+    expect(shell.offsetHeight).toBe(120);
+    expect(followingSiblingY()).toBeLessThan(originalSiblingY);
+    await act(async () => { root.unmount(); });
   });
 
   it("remeasures a card selected in overview before restoring normal sibling spacing", async () => {
@@ -3588,6 +3952,86 @@ describe("DocumentWorkspace", () => {
 
     expect(paste.event.defaultPrevented).toBe(true);
     expect(contentText(nextContentJson ?? "")).toBe("Copied scene");
+    expect(useDocumentStore.getState().navigationPast).toHaveLength(1);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("pastes copied card content into a new card below an occupied target", async () => {
+    let snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    snapshot = replaceCardContent(snapshot, {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Copied scene"),
+    });
+    snapshot = replaceCardContent(snapshot, {
+      cardId: "card-b",
+      contentJson: contentJsonForPlainText("Occupied scene"),
+    });
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({
+      activeDocument: snapshot.summary,
+      mode: "navigation",
+      notice: null,
+      screen: "workspace",
+    });
+    useInteractionStore.setState({
+      activeCardId: "card-a",
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} />);
+    });
+
+    const copy = createClipboardEvent("copy");
+
+    await act(async () => {
+      window.dispatchEvent(copy.event);
+    });
+
+    await act(async () => {
+      useInteractionStore.setState({
+        activeCardId: "card-b",
+      });
+    });
+
+    const paste = createClipboardEvent("paste", {
+      "text/plain": copy.data.get("text/plain") ?? "",
+    });
+
+    await act(async () => {
+      window.dispatchEvent(paste.event);
+    });
+
+    const nextSnapshot = useDocumentStore.getState().snapshot;
+    const pastedContent = nextSnapshot?.contents.find(
+      (content) =>
+        content.cardId !== "card-a" &&
+        content.contentJson === contentJsonForPlainText("Copied scene"),
+    );
+    const pastedCard = nextSnapshot?.cards.find(
+      (card) => card.id === pastedContent?.cardId,
+    );
+    const rootChildren = nextSnapshot?.cards
+      .filter((card) => card.parentId === "card-root")
+      .sort((left, right) => left.orderIndex - right.orderIndex);
+
+    expect(paste.event.defaultPrevented).toBe(true);
+    expect(contentText(nextSnapshot?.contents.find((content) => content.cardId === "card-b")?.contentJson ?? "")).toBe("Occupied scene");
+    expect(pastedCard?.parentId).toBe("card-root");
+    expect(rootChildren?.map((card) => card.id)).toEqual([
+      "card-a",
+      "card-b",
+      pastedCard?.id,
+    ]);
+    expect(useInteractionStore.getState().activeCardId).toBe(pastedCard?.id);
     expect(useDocumentStore.getState().navigationPast).toHaveLength(1);
 
     await act(async () => {

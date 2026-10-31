@@ -1,5 +1,6 @@
 import {
   firstChildCardId,
+  preferredChildCardId,
   nextSiblingCardId,
   nextVisibleCardId,
   parentCardId,
@@ -10,6 +11,15 @@ import {
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 describe("document navigation", () => {
+  it("uses remembered direct children and falls back for deleted or reparented targets", () => {
+    const { cards } = makeDocumentSnapshot();
+    expect(preferredChildCardId(cards, "card-root", { "card-root": "card-b" })).toBe("card-b");
+    for (const target of ["missing", "card-root"]) {
+      expect(preferredChildCardId(cards, "card-root", { "card-root": target })).toBe("card-a");
+    }
+    expect(preferredChildCardId(cards, "card-a", {})).toBeNull();
+  });
+
   it("walks visible cards in preorder for unbalanced trees", () => {
     const snapshot = makeDocumentSnapshot();
     snapshot.cards.push(
