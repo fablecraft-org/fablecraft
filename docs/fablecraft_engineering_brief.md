@@ -433,6 +433,7 @@ animation: ~140ms ease-in-out
 - `.env.example` documents the required website env vars for Vercel or other static hosting
 - maintainers publish a new website-backed macOS download by pushing a `v*` tag that matches the desktop version and letting the GitHub Actions workflow attach the renamed DMG asset to the release
 - Release `v0.3.0` keeps the version synchronized across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; user-facing changes are recorded in `docs/releases/v0.3.0.md`.
+- CI's macOS check and the Apple Silicon release job run on GitHub's `macos-15` runner. The retired `macos-14` label must not be used: scheduled retirement brownouts prevent jobs from starting, including the signing/notarization release job.
 - website runtime detection must not invoke desktop updater behavior in browser builds
 
 ---

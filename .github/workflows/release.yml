@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-macos-arm64:
-    runs-on: macos-14
+    runs-on: macos-15
 
     env:
       RELEASE_ASSET_NAME: Fablecraft-macos-arm64.dmg
