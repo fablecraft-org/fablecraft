@@ -57,7 +57,6 @@ pub fn create_document(
 #[tauri::command]
 pub fn create_untitled_document_in_directory(
     path: String,
-    state: State<'_, AppState>,
 ) -> Result<DocumentSummary, AppErrorPayload> {
     let directory = PathBuf::from(path);
 
@@ -71,7 +70,6 @@ pub fn create_untitled_document_in_directory(
 
     let document_path = next_untitled_document_path(&directory);
     let summary = DocumentRepository::create(document_path)?;
-    update_app_state(&state, &summary);
     Ok(summary)
 }
 
@@ -483,11 +481,28 @@ fn update_app_state(state: &State<'_, AppState>, summary: &DocumentSummary) {
 #[cfg(test)]
 mod tests {
     use super::{
-        existing_document_paths, list_fable_directory_for_document, renamed_fable_document_path,
+        create_untitled_document_in_directory, existing_document_paths,
+        list_fable_directory_for_document, renamed_fable_document_path,
         validate_deletable_fable_document_path,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn directory_creation_persists_blank_files_without_overwriting_existing_documents() {
+        let folder = temp_folder("directory-create");
+        let first = create_untitled_document_in_directory(folder.to_string_lossy().into_owned()).unwrap();
+        let first_bytes = fs::read(&first.path).unwrap();
+        let second = create_untitled_document_in_directory(folder.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(std::path::Path::new(&first.path), folder.join("Untitled.fable"));
+        assert_eq!(std::path::Path::new(&second.path), folder.join("Untitled 2.fable"));
+        assert_ne!(first.document_id, second.document_id);
+        assert_eq!(fs::read(&first.path).unwrap(), first_bytes);
+        let snapshot = crate::storage::DocumentRepository::load(second.path.into()).unwrap();
+        assert_eq!(snapshot.cards.len(), 1);
+        assert!(create_untitled_document_in_directory(folder.join("missing").to_string_lossy().into_owned()).is_err());
+        fs::remove_dir_all(folder).unwrap();
+    }
 
     #[test]
     fn recent_paths_include_only_existing_files_without_opening_them() {

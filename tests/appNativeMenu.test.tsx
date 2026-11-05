@@ -75,10 +75,16 @@ vi.mock("../src/storage/documentSnapshots", () => ({
 }));
 
 vi.mock("../src/components/DocumentWorkspace", () => ({
-  DocumentWorkspace: ({ onDocumentDeleted }: { onDocumentDeleted: (path: string) => void }) => (
+  DocumentWorkspace: ({ onDocumentDeleted, onDocumentCreated }: {
+    onDocumentDeleted: (path: string) => void;
+    onDocumentCreated: (document: ReturnType<typeof makeDocumentSnapshot>["summary"]) => void;
+  }) => (
     <div data-testid="document-workspace">
       <button data-testid="trash-current" onClick={() => onDocumentDeleted(useAppStore.getState().activeDocument!.path)} />
       <button data-testid="trash-other" onClick={() => onDocumentDeleted("/tmp/other.fable")} />
+      <button data-testid="create-in-directory" onClick={() => onDocumentCreated({
+        documentId: "new-doc", name: "Untitled", openedAtMs: 2, path: "/tmp/Untitled.fable",
+      })} />
     </div>
   ),
 }));
@@ -252,6 +258,30 @@ describe("App native menu handling", () => {
       expect(useInteractionStore.getState().activeCardId).toBeNull();
     }
     await act(async () => { root.unmount(); });
+  });
+
+  it("keeps the current document, snapshot, and recent history when a directory file is created", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<App />); });
+    const snapshot = makeDocumentSnapshot();
+    await act(async () => {
+      useAppStore.getState().setDocument(snapshot.summary);
+      useAppStore.getState().setMode("navigation");
+      useDocumentStore.getState().hydrateSnapshot(snapshot);
+    });
+    const currentSnapshot = useDocumentStore.getState().snapshot;
+    const recentPaths = readRecentDocumentPaths();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="create-in-directory"]')!.click();
+    });
+    expect(useAppStore.getState().activeDocument).toEqual(snapshot.summary);
+    expect(useDocumentStore.getState().snapshot).toEqual(currentSnapshot);
+    expect(useAppStore.getState().mode).toBe("navigation");
+    expect(readRecentDocumentPaths()).toEqual(recentPaths);
+    await act(async () => { root.unmount(); });
+    container.remove();
   });
 
   it("keeps one native menu listener after opening a document", async () => {

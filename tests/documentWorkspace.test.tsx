@@ -332,6 +332,37 @@ describe("DocumentWorkspace", () => {
     container.remove();
   });
 
+  it("keeps Tab and Shift+Tab from moving focus independently of directory selection", async () => {
+    const snapshot = makeDocumentSnapshot();
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+
+    for (const selection of ["file", "folder"]) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+      });
+      const selectedCard = container.querySelector('[data-testid="directory-card"][data-is-active="true"]');
+      expect(selectedCard).not.toBeNull();
+      expect(Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'))
+        .every(card => card.tabIndex === -1)).toBe(true);
+
+      for (const shiftKey of [false, true]) {
+        const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab", shiftKey });
+        await act(async () => { window.dispatchEvent(event); });
+        expect(event.defaultPrevented, `${selection}, shift=${shiftKey}`).toBe(true);
+        expect(container.querySelector('[data-testid="directory-card"][data-is-active="true"]')).toBe(selectedCard);
+      }
+    }
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
   it("moves the lower section into a sibling, keeps editing at its start, and undoes the divide together", async () => {
     const snapshot = replaceCardContent(makeDocumentSnapshot(), {
       cardId: "card-a",
@@ -639,10 +670,11 @@ describe("DocumentWorkspace", () => {
       root.render(<DocumentWorkspace document={snapshot.summary} />);
     });
 
-    expect(container.textContent).toContain("story");
+    expect(container.textContent).toContain("Story");
     expect(container.textContent).not.toContain("Fables");
     expect(container.textContent).not.toContain("FOLDER");
-    expect(container.textContent).toContain("FABLE");
+    expect(container.textContent).not.toContain("FABLE");
+    expect(container.querySelector('[data-testid="document-title"]')?.textContent).toBe("Story");
     expect(container.textContent).not.toContain("side-story.fable");
 
     const initialDirectoryCards = Array.from(
@@ -652,8 +684,8 @@ describe("DocumentWorkspace", () => {
       card.textContent?.includes("story"),
     );
 
-    expect(documentCard?.style.width).toBe("234px");
-    expect(documentCard?.textContent).not.toContain(".fable");
+    expect(initialDirectoryCards).toHaveLength(0);
+    expect(documentCard).toBeUndefined();
 
     await act(async () => {
       window.dispatchEvent(
@@ -665,8 +697,12 @@ describe("DocumentWorkspace", () => {
     });
 
     expect(container.querySelector('[data-testid="active-card-shell"]')).toBeNull();
+    expect(container.querySelector('[data-testid="tree-card"]')).toBeNull();
+    expect(container.querySelector('[data-testid="empty-child-gap"]')).toBeNull();
     expect(container.textContent).toContain("Fables");
     expect(container.textContent).toContain("story");
+    expect(container.querySelector('[data-testid="document-title"]')).toBeNull();
+    expect(container.querySelector('[data-testid="directory-card"]')?.getAttribute("style")).toContain("234px");
 
     await act(async () => {
       window.dispatchEvent(
@@ -991,6 +1027,13 @@ describe("DocumentWorkspace", () => {
     expect(container.querySelector("input")).toBeNull();
 
     await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+    });
+
+    expect(container.querySelector('[data-testid="document-title"]')?.textContent).toBe("field notes");
+    expect(container.querySelector('[data-testid="directory-card"]')).toBeNull();
+
+    await act(async () => {
       root.unmount();
     });
   });
@@ -1059,67 +1102,148 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("creates an untitled fable document from the folder card with Ctrl+Right", async () => {
+  it.each([
+    ["folder", "escape"],
+    ["current-file", "blank"],
+    ["neighbour-file", "rename"],
+    ["neighbour-folder", "escape"],
+    ["preview-file", "rename"],
+    ["preview-folder", "blank"],
+  ].flatMap(([selection, naming]) =>
+    ["ArrowRight", "ArrowUp", "ArrowDown"].map(creationKey => [selection, naming, creationKey]),
+  ))("creates beside %s, handles %s naming with %s, and waits for Right to open", async (selection, naming, creationKey) => {
     const snapshot = makeDocumentSnapshot();
+    snapshot.summary.path = "/tmp/Fables/story.fable";
+    const targetFolder = selection.startsWith("preview") ? "/tmp/Fables/Archive" : "/tmp/Fables";
     const createdDocument = {
-      documentId: "created-doc",
-      name: "Untitled",
-      openedAtMs: 2,
-      path: "/tmp/Fables/Untitled.fable",
+      documentId: "created-doc", name: "Untitled", openedAtMs: 2,
+      path: `${targetFolder}/Untitled.fable`,
     };
-    const onDocumentCreated = vi.fn();
+    let created = false;
+    let finalName = "Untitled";
+    const listing = (path: string) => ({
+      currentDocumentPath: snapshot.summary.path,
+      entries: [
+        { kind: "folder", name: "Archive", path: `${path}/Archive` },
+        { kind: "document", name: "story.fable", path: `${path}/story.fable` },
+        ...(created && path === targetFolder ? [{ kind: "document", name: `${finalName}.fable`, path: `${path}/${finalName}.fable` }] : []),
+      ],
+      folderName: path.endsWith("Archive") ? "Archive" : "Fables",
+      folderPath: path,
+      parentFolderPath: "/tmp",
+    });
+    listCurrentDocumentDirectory.mockResolvedValue(listing("/tmp/Fables"));
+    listFableDirectory.mockImplementation(async (path: string) => listing(path));
+    createUntitledDocumentInDirectory.mockImplementation(async () => {
+      created = true;
+      return createdDocument;
+    });
+    renameFableDocument.mockImplementation(async (_path: string, name: string) => {
+      finalName = name;
+      return { ...createdDocument, name, path: `${targetFolder}/${name}.fable` };
+    });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.getState().setDocument(snapshot.summary);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    const onOpenDocumentPath = vi.fn();
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
+    await act(async () => {
+      root.render(<DocumentWorkspace document={snapshot.summary} onOpenDocumentPath={onOpenDocumentPath} />);
+    });
+    async function press(key: string, modifier: "meta" | "ctrl" | null = null) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key, metaKey: modifier === "meta", ctrlKey: modifier === "ctrl" }));
+      });
+    }
+    async function select(label: string) {
+      const card = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="directory-card"]'))
+        .find(card => card.textContent === label);
+      expect(card).toBeDefined();
+      await act(async () => { card!.click(); });
+    }
+    await press("ArrowLeft");
+    if (selection === "folder") await press("ArrowLeft");
+    if (selection === "neighbour-file") await select("FABLEstory");
+    if (selection === "neighbour-folder" || selection.startsWith("preview")) await select("FOLDERArchive");
+    if (selection.startsWith("preview")) {
+      await press("ArrowRight");
+      if (selection === "preview-file") await press("ArrowDown");
+    }
+    await press(creationKey, creationKey === "ArrowRight" ? "meta" : "ctrl");
 
-    useDocumentStore.getState().hydrateSnapshot(snapshot);
-    useAppStore.setState({
-      activeDocument: snapshot.summary,
-      mode: "navigation",
-      notice: null,
-      screen: "workspace",
+    expect(createUntitledDocumentInDirectory).toHaveBeenCalledWith(targetFolder);
+    expect(onOpenDocumentPath).not.toHaveBeenCalled();
+    expect(useAppStore.getState().activeDocument?.documentId).toBe(snapshot.summary.documentId);
+    expect(useDocumentStore.getState().snapshot?.summary.documentId).toBe(snapshot.summary.documentId);
+    expect(useAppStore.getState().mode).toBe("navigation");
+    expect(container.querySelector('[data-testid="tree-card"]')).toBeNull();
+    const input = container.querySelector("input")!;
+    expect(input.value).toBe("Untitled");
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+    await act(async () => {
+      if (naming !== "escape") {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(input, naming === "blank" ? "   " : "Field notes");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     });
-    useInteractionStore.setState({
-      activeCardId: "card-root",
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: naming === "escape" ? "Escape" : "Enter" }));
     });
+    expect(container.querySelector("input")).toBeNull();
+    expect(onOpenDocumentPath).not.toHaveBeenCalled();
+    if (naming === "rename") expect(renameFableDocument).toHaveBeenCalledWith(createdDocument.path, "Field notes");
+    else expect(renameFableDocument).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="directory-card"][data-is-active="true"]')?.textContent).toBe(`FABLE${finalName}`);
+    await press("ArrowRight");
+    expect(onOpenDocumentPath).toHaveBeenCalledWith(`${targetFolder}/${finalName}.fable`);
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  it("ignores duplicate creation shortcuts while pending and allows retry after failure", async () => {
+    const snapshot = makeDocumentSnapshot();
     loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
-    createUntitledDocumentInDirectory.mockResolvedValue(createdDocument);
-
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    let rejectCreation!: (error: Error) => void;
+    createUntitledDocumentInDirectory.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectCreation = reject; }));
+    const createdDocument = { documentId: "new-doc", name: "Untitled", openedAtMs: 2, path: "/tmp/Fables/Untitled.fable" };
+    createUntitledDocumentInDirectory.mockResolvedValueOnce(createdDocument);
+    const onOpenDocumentPath = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
     await act(async () => {
-      root.render(
-        <DocumentWorkspace
-          document={snapshot.summary}
-          onDocumentCreated={onDocumentCreated}
-        />,
-      );
+      root.render(<DocumentWorkspace document={snapshot.summary} onOpenDocumentPath={onOpenDocumentPath} />);
     });
-
-    await act(async () => {});
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
-    });
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
-    });
-
-    await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          ctrlKey: true,
-          key: "ArrowRight",
-        }),
-      );
-    });
-
-    expect(createUntitledDocumentInDirectory).toHaveBeenCalledWith("/tmp/Fables");
-    expect(onDocumentCreated).toHaveBeenCalledWith(createdDocument);
-
-    await act(async () => {
-      root.unmount();
-    });
+    async function press(key: string, ctrlKey = false) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key, ctrlKey }));
+      });
+    }
+    await press("ArrowLeft");
+    await press("ArrowRight", true);
+    await press("ArrowRight", true);
+    expect(createUntitledDocumentInDirectory).toHaveBeenCalledTimes(1);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(async () => { rejectCreation(new Error("Could not create file.")); });
+    log.mockRestore();
+    expect(container.querySelector('[data-testid="directory-load-error"]')?.textContent).toBe("Could not create file.");
+    expect(container.querySelector("input")).toBeNull();
+    expect(onOpenDocumentPath).not.toHaveBeenCalled();
+    expect(useDocumentStore.getState().snapshot?.summary.documentId).toBe(snapshot.summary.documentId);
+    await press("ArrowRight", true);
+    expect(createUntitledDocumentInDirectory).toHaveBeenCalledTimes(2);
+    expect(container.querySelector<HTMLInputElement>("input")?.value).toBe("Untitled");
+    expect(onOpenDocumentPath).not.toHaveBeenCalled();
+    await act(async () => { root.unmount(); });
+    container.remove();
   });
 
   it("confirms before deleting a selected sibling fable document", async () => {
@@ -1442,6 +1566,8 @@ describe("DocumentWorkspace", () => {
     expect(selectedFolderCard?.style.top).toBe("calc(50% + 0px)");
     expect(firstPreviewChildCard?.style.top).toBe("calc(50% + 0px)");
     expect(container.textContent).toContain("FABLEScratchpad");
+    expect(container.querySelector('[data-testid="tree-card"]')).toBeNull();
+    expect(container.querySelector('[data-testid="active-card-shell"]')).toBeNull();
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
@@ -1451,26 +1577,46 @@ describe("DocumentWorkspace", () => {
     expect(container.textContent).toContain("FOLDERRobotics");
     expect(container.textContent).toContain("FABLERobotics");
     expect(container.textContent).toContain("FABLEScratchpad");
+    expect(container.querySelector('[data-testid="tree-card"]')).toBeNull();
+    expect(container.querySelector('[data-testid="active-card-shell"]')).toBeNull();
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
     });
 
     expect(container.textContent).not.toContain("FOLDERFrontier");
-    expect(container.textContent).toContain("FOLDERRobotics");
-    expect(container.textContent).toContain("FABLERobotics");
-    expect(container.textContent).toContain("FABLEScratchpad");
+    expect(container.textContent).not.toContain("FOLDERRobotics");
+    expect(container.textContent).not.toContain("FABLERobotics");
+    expect(container.textContent).not.toContain("FABLEScratchpad");
     expect(container.querySelector('[data-testid="active-card-shell"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="document-title"]')?.textContent).toBe("Robotics");
+    expect(container.querySelector('[data-testid="directory-card"]')).toBeNull();
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
     });
 
     expect(container.textContent).not.toContain("FOLDERFrontier");
-    expect(container.textContent).toContain("FOLDERRobotics");
-    expect(container.textContent).toContain("FABLERobotics");
-    expect(container.textContent).toContain("FABLEScratchpad");
+    expect(container.textContent).not.toContain("FOLDERRobotics");
+    expect(container.textContent).not.toContain("FABLERobotics");
+    expect(container.textContent).not.toContain("FABLEScratchpad");
     expect(container.querySelector('[data-testid="active-card-shell"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="document-title"]')?.textContent).toBe("Robotics");
+    expect(container.querySelector('[data-testid="directory-card"]')).toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }));
+    });
+
+    expect(container.querySelector('[data-testid="document-title"]')).toBeNull();
+    expect(container.querySelector('[data-is-active="true"][data-testid="directory-card"]')?.textContent).toBe("FABLERobotics");
+    expect(container.textContent).toContain("FOLDERRobotics");
+    expect(container.textContent).toContain("FABLEScratchpad");
+    expect(container.querySelector('[data-testid="tree-card"]')).toBeNull();
+    expect(container.querySelector('[data-testid="active-card-shell"]')).toBeNull();
 
     await act(async () => {
       root.unmount();

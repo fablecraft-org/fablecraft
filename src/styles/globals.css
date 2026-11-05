@@ -41,6 +41,48 @@ body[data-fc-runtime="web"] {
   -webkit-app-region: drag;
 }
 
+.fc-document-title {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  isolation: isolate;
+  max-width: min(var(--fc-document-title-max-width), calc(100% - 2 * var(--fc-document-title-controls-inset)));
+  padding: 0 var(--fc-document-title-padding);
+  text-align: center;
+  pointer-events: none;
+  font-family: var(--fc-font-ui);
+  font-size: var(--fc-document-title-font-size);
+  font-weight: var(--fc-document-title-font-weight);
+  line-height: var(--fc-document-title-height);
+  color: var(--fc-color-text);
+}
+
+.fc-document-title span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-document-title::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 calc(-1 * var(--fc-document-title-fade)) calc(-1 * var(--fc-document-title-fade));
+  background: var(--fc-color-app);
+  /* Keep the whole label opaque, then fade into the workspace on three edges. */
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 var(--fc-document-title-fade), #000 calc(100% - var(--fc-document-title-fade)), transparent),
+    linear-gradient(to bottom, #000 calc(100% - var(--fc-document-title-fade)), transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent, #000 var(--fc-document-title-fade), #000 calc(100% - var(--fc-document-title-fade)), transparent),
+    linear-gradient(to bottom, #000 calc(100% - var(--fc-document-title-fade)), transparent);
+  mask-composite: intersect;
+}
+
 button,
 input,
 textarea,

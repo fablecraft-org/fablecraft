@@ -640,9 +640,6 @@ export function App() {
   };
 
   function handleWorkspaceDocumentCreated(document: NonNullable<typeof activeDocument>) {
-    setRecentDocumentPaths(rememberLastDocumentPath(document.path));
-    setDocument(document);
-    setMode("editing");
     setNotice({
       tone: "info",
       message: `Created "${document.name}".`,

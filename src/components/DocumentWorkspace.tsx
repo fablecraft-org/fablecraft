@@ -209,6 +209,7 @@ function ExplorerCard({
       data-is-active={String(isActive)}
       data-testid="directory-card"
       onClick={onClick}
+      tabIndex={-1}
       style={{
         backgroundColor:
           kind === "folder"
@@ -296,6 +297,8 @@ export function DocumentWorkspace({
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const deletedPathsRef = useRef(new Set<string>());
   const deleteInFlightRef = useRef(false);
+  const createInFlightRef = useRef(false);
+  const newlyCreatedDocumentPathRef = useRef<string | null>(null);
   const cancelDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
   const tabKeyHeldRef = useRef(false);
@@ -623,19 +626,7 @@ export function DocumentWorkspace({
   const explorerColumnWidth = explorerCardWidth + explorerGap;
   const explorerToDocumentOffset =
     explorerCardWidth / 2 + uiMetrics.cardWidth / 2 + explorerGap;
-  const cardColumnShift =
-    explorerSelection.kind === "current-document" ||
-    (explorerSelection.kind === "preview-entry" &&
-      selectedPreviewEntry?.path === document.path)
-      ? explorerToDocumentOffset
-      : 0;
-  const shouldShowDocumentTree =
-    explorerSelection.kind !== "folder" &&
-    explorerSelection.kind !== "entry" &&
-    !(
-      explorerSelection.kind === "preview-entry" &&
-      selectedPreviewEntry?.path !== document.path
-    );
+  const shouldShowDocumentTree = !isExplorerSelectionActive;
   const currentDocumentName = directory
     ? documentNameWithoutExtension(directory.currentDocumentPath)
     : documentNameWithoutExtension(document.name);
@@ -702,17 +693,11 @@ export function DocumentWorkspace({
     explorerSelection.kind === "entry" ||
     (explorerSelection.kind === "current-document" && Boolean(currentDocumentDirectoryEntry));
   const shouldRenderCurrentDocumentFallback =
-    (explorerSelection.kind === "current-document" && !currentDocumentDirectoryEntry) ||
-    (explorerSelection.kind === "card" && !selectedPreviewEntry);
+    explorerSelection.kind === "current-document" && !currentDocumentDirectoryEntry;
   const shouldRenderPreviewEntryColumn =
     selectedDirectoryEntry?.kind === "folder" &&
     (explorerSelection.kind === "entry" ||
-      explorerSelection.kind === "preview-entry" ||
-      (explorerSelection.kind === "card" && Boolean(selectedPreviewEntry)));
-  const shouldRenderPreviewEntryFallback =
-    explorerSelection.kind === "card" &&
-    selectedPreviewEntry &&
-    !shouldRenderPreviewEntryColumn;
+      explorerSelection.kind === "preview-entry");
   const explorerPanLimit = directoryEntries.reduce(
     (limit, _entry, index) =>
       Math.max(limit, Math.abs(explorerEntryY(index)) + uiMetrics.cardHeight),
@@ -732,7 +717,7 @@ export function DocumentWorkspace({
     }),
     { x: layoutMetrics.cardWidth, y: layoutMetrics.cardHeight },
   );
-  if (directory && !isOverviewMode) {
+  if (directory && !isOverviewMode && isExplorerSelectionActive) {
     stagePanLimit.x = Math.max(
       stagePanLimit.x,
       explorerToDocumentOffset +
@@ -822,22 +807,53 @@ export function DocumentWorkspace({
   }
 
   async function createDocumentInCurrentDirectory() {
-    if (!directory) {
+    if (!directory || createInFlightRef.current) {
       return;
     }
 
+    const previewParentPath = explorerSelection.kind === "preview-entry"
+      ? explorerSelection.parentPath
+      : null;
+    const targetPath = previewParentPath ?? directory.folderPath;
+    createInFlightRef.current = true;
     try {
-      const nextDocument = await createUntitledDocumentInDirectory(directory.folderPath);
+      // Read before creating so a failed refresh cannot hide a successfully created file.
+      const listing = await listFableDirectory(targetPath);
+      const nextDocument = await createUntitledDocumentInDirectory(targetPath);
       deletedPathsRef.current.delete(nextDocument.path);
+      const nextListing: FableDirectory = {
+        ...listing,
+        entries: [...listing.entries, {
+          kind: "document" as const,
+          name: fileNameFromPath(nextDocument.path),
+          path: nextDocument.path,
+        }].sort((left, right) => {
+          if (left.kind !== right.kind) return left.kind === "folder" ? -1 : 1;
+          const leftName = left.name.toLowerCase();
+          const rightName = right.name.toLowerCase();
+          return leftName < rightName ? -1 : leftName > rightName ? 1 : 0;
+        }),
+      };
+      if (previewParentPath) {
+        setPreviewDirectory(nextListing);
+        selectExplorer({ kind: "preview-entry", parentPath: previewParentPath, path: nextDocument.path });
+      } else {
+        setDirectory(nextListing);
+        selectExplorer({ kind: "entry", path: nextDocument.path });
+      }
+      newlyCreatedDocumentPathRef.current = nextDocument.path;
+      setRenamingDocumentPath(nextDocument.path);
+      setRenameDraft(documentNameWithoutExtension(nextDocument.name));
+      setDirectoryLoadError(null);
+      setMode("navigation");
       onDocumentCreated?.(nextDocument);
-      setDirectory(await listCurrentDocumentDirectory());
-      selectExplorer({ kind: "card" });
-      setMode("editing");
     } catch (error) {
       console.error(error);
       setDirectoryLoadError(
         error instanceof Error ? error.message : "Could not create document.",
       );
+    } finally {
+      createInFlightRef.current = false;
     }
   }
 
@@ -854,6 +870,7 @@ export function DocumentWorkspace({
   }
 
   function cancelRename() {
+    newlyCreatedDocumentPathRef.current = null;
     setRenamingDocumentPath(null);
     setRenameDraft("");
   }
@@ -919,6 +936,10 @@ export function DocumentWorkspace({
     }
 
     const previousPath = renamingDocumentPath;
+    if (previousPath === newlyCreatedDocumentPathRef.current && !renameDraft.trim()) {
+      cancelRename();
+      return;
+    }
 
     try {
       const nextDocument = await renameFableDocument(previousPath, renameDraft);
@@ -1468,6 +1489,7 @@ export function DocumentWorkspace({
     }
 
     if (selectedRenamableDocument?.path !== renamingDocumentPath) {
+      newlyCreatedDocumentPathRef.current = null;
       setRenamingDocumentPath(null);
       setRenameDraft("");
     }
@@ -1758,7 +1780,7 @@ export function DocumentWorkspace({
         return;
       }
 
-      if (renamingDocumentPath) {
+      if (renamingDocumentPath || createInFlightRef.current) {
         return;
       }
 
@@ -1784,6 +1806,11 @@ export function DocumentWorkspace({
       }
 
       if (mode === "navigation" && explorerSelection.kind !== "card") {
+        if (event.key === "Tab") {
+          event.preventDefault();
+          return;
+        }
+
         if (event.key === "Enter" && selectedRenamableDocument) {
           event.preventDefault();
           startRenamingSelectedDocument();
@@ -1792,8 +1819,7 @@ export function DocumentWorkspace({
 
         if (
           (event.metaKey || event.ctrlKey) &&
-          event.key === "ArrowRight" &&
-          explorerSelection.kind === "folder"
+          (event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown")
         ) {
           event.preventDefault();
           void createDocumentInCurrentDirectory();
@@ -2334,12 +2360,19 @@ export function DocumentWorkspace({
 
   return (
     <section className="relative flex h-full w-full items-stretch overflow-hidden">
+      {!isExplorerSelectionActive ? (
+        <div className="fc-document-title" data-testid="document-title">
+          <span title={documentNameWithoutExtension(activeSnapshot?.summary.name ?? document.name)}>
+            {documentNameWithoutExtension(activeSnapshot?.summary.name ?? document.name)}
+          </span>
+        </div>
+      ) : null}
       <div
         data-testid="document-stage"
         className="relative h-full w-full overflow-hidden"
         onWheel={handleStageWheel}
       >
-        {directory && !isOverviewMode ? (
+        {directory && !isOverviewMode && isExplorerSelectionActive ? (
           <>
             {parentFolderName && explorerSelection.kind === "folder" ? (
               <ExplorerCard
@@ -2357,8 +2390,7 @@ export function DocumentWorkspace({
                 y={stageOffset.y}
               />
             ) : null}
-            {explorerSelection.kind !== "preview-entry" &&
-            explorerSelection.kind !== "card" ? (
+            {explorerSelection.kind !== "preview-entry" ? (
               <ExplorerCard
                 isActive={explorerSelection.kind === "folder"}
                 kind="folder"
@@ -2396,9 +2428,7 @@ export function DocumentWorkspace({
                   ),
                 )
               : null}
-            {(explorerSelection.kind === "preview-entry" ||
-              (explorerSelection.kind === "card" && selectedPreviewEntry)) &&
-            selectedDirectoryEntry ? (
+            {explorerSelection.kind === "preview-entry" && selectedDirectoryEntry ? (
               <ExplorerCard
                 isActive={false}
                 kind={selectedDirectoryEntry.kind === "folder" ? "folder" : "document"}
@@ -2415,11 +2445,7 @@ export function DocumentWorkspace({
                 {...(selectedDirectoryEntry.kind === "document"
                   ? renamePropsForDocument(selectedDirectoryEntry.path)
                   : {})}
-                x={
-                  explorerSelection.kind === "card"
-                    ? -explorerToDocumentOffset - explorerColumnWidth + stageOffset.x
-                    : -explorerColumnWidth + stageOffset.x
-                }
+                x={-explorerColumnWidth + stageOffset.x}
                 y={stageOffset.y}
               />
             ) : null}
@@ -2498,39 +2524,15 @@ export function DocumentWorkspace({
                   x={
                     explorerSelection.kind === "entry"
                       ? explorerColumnWidth + stageOffset.x
-                      : explorerSelection.kind === "card"
-                        ? -explorerToDocumentOffset + stageOffset.x
-                        : stageOffset.x
+                      : stageOffset.x
                   }
                   y={previewEntryY(index) + stageOffset.y}
                 />
               ))
             ) : null}
-            {shouldRenderPreviewEntryFallback ? (
-              <ExplorerCard
-                isActive={false}
-                kind={selectedPreviewEntry.kind === "folder" ? "folder" : "document"}
-                label={explorerLabelForEntry(selectedPreviewEntry)}
-                meta={selectedPreviewEntry.kind === "folder" ? "FOLDER" : "FABLE"}
-                onClick={() => {
-                  selectExplorer({
-                    kind: "preview-entry",
-                    parentPath: explorerSelection.parentPath ?? "",
-                    path: selectedPreviewEntry.path,
-                  });
-                  setMode("navigation");
-                }}
-                width={explorerCardWidth}
-                {...(selectedPreviewEntry.kind === "document"
-                  ? renamePropsForDocument(selectedPreviewEntry.path)
-                  : {})}
-                x={-explorerToDocumentOffset + stageOffset.x}
-                y={stageOffset.y}
-              />
-            ) : null}
           </>
         ) : null}
-        {directoryLoadError && !isOverviewMode ? (
+        {directoryLoadError && !isOverviewMode && isExplorerSelectionActive ? (
           <p
             className="pointer-events-none absolute left-1/2 top-1/2 m-0 max-w-[360px] -translate-x-1/2 translate-y-[72px] text-center font-[var(--fc-font-ui)] text-[12px] text-[var(--fc-color-muted)]"
             data-testid="directory-load-error"
@@ -2562,7 +2564,7 @@ export function DocumentWorkspace({
             type="button"
           />
         ) : null}
-        {isOverviewMode && overviewConnectors.length > 0 ? (
+        {shouldShowDocumentTree && isOverviewMode && overviewConnectors.length > 0 ? (
           <svg
             aria-hidden="true"
             className="pointer-events-none absolute left-1/2 top-1/2 h-px w-px overflow-visible"
@@ -2610,7 +2612,7 @@ export function DocumentWorkspace({
             return null;
           }
 
-          const displayX = card.x + cardColumnShift + stageOffset.x;
+          const displayX = card.x + stageOffset.x;
           const displayY = card.y + stageOffset.y;
           const activeCardOverflowsViewport =
             !isOverviewMode &&

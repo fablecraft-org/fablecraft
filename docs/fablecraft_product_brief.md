@@ -78,15 +78,17 @@ Cards do NOT have titles.
 ### 2.3 Folder Context
 
 - The workspace includes a shallow file-system context to the left of the document tree.
-- The current document appears as a distinct `.fable` document card immediately left of the root-card column.
+- While inside a document, file-system context cards are hidden. The document name (without `.fable`) appears centered at the top of the window in medium-weight text, including in overview. Long names truncate with an ellipsis.
+- The document title sits over an opaque app-background surface with a gradual fade along its left, right, and bottom edges, so cards passing behind it cannot obscure the name. The title stays fixed when the writing canvas pans and does not intercept pointer or window-drag gestures.
 - The current folder appears as a distinct folder card while navigating folder context.
 - Folder and document context cards use different surfaces from writing cards and do not become persisted document cards.
 - Folder and FABLE explorer cards render at half the width of writing cards.
 - Explorer context card labels use plain `FOLDER` and `FABLE` labels.
+- In directory navigation, Tab and Shift+Tab do not move browser focus between explorer cards or show a separate blue focus highlight; arrow keys control the selected file or folder. Rename fields and dialogs keep their normal keyboard focus behavior.
 - FABLE explorer card names hide the `.fable` file extension.
 - Folder and FABLE explorer cards follow the same spatial navigation model as writing cards: the selected explorer card is centered, its same-level siblings remain visible in the same vertical column, its parent sits one column to the left, and its remembered child (otherwise its first visible child) sits one column to the right on the same vertical center line.
 - Moving left from a root card selects the current `.fable` document card; moving left again selects the containing folder.
-- While navigating normal document cards from the current document card, only the current `.fable` document card remains visible to the left of the writing tree; when the document tree is entered from a folder preview, that folder and its sibling FABLE file column remain visible until the user navigates back out of that folder context.
+- Moving left out of the root-card column reveals the selected FABLE file, its sibling files/folders, and its containing folder. Returning right into the document hides all explorer cards and restores the centered title; moving left back out restores the explorer location, including a nested folder preview. The fixed title and all writing cards are hidden while browsing files and folders, including when the open FABLE file is selected. File browsing and document content are separate views; Right from the open file enters its writing tree.
 - When a folder is selected, its parent folder remains visible to the left when one exists, and the right column immediately shows only child folders and `.fable` files in the selected folder.
 - Moving left from a FABLE file to its containing folder also shows that folder's public sibling folders and `.fable` files in the selected column. Up/Down and clicks select those same-level neighbours; Right selects the remembered child of the active folder, falling back to its first visible child.
 - When a child folder row is selected inside a folder listing, that child folder's own child folders and `.fable` files appear immediately in the next column to the right.
@@ -98,7 +100,8 @@ Cards do NOT have titles.
 - Selecting a child folder and moving right or pressing Enter browses into that folder.
 - Folder preview children are real navigation targets: Right from a selected child folder moves to its remembered child folder or FABLE file (otherwise its first visible child) before entering/opening that child.
 - When a FABLE file is selected and it is the open document, Right moves into the document's remembered root card (otherwise its first root card).
-- Ctrl/Cmd+Right on the folder card creates a new untitled `.fable` document in that folder and opens it.
+- Ctrl/Cmd+Right, Ctrl/Cmd+Up, or Ctrl/Cmd+Down in directory mode creates a new untitled `.fable` file and selects its explorer card with the name ready to edit. From a folder card it creates inside that folder; from a file or child-folder entry it creates beside that entry in its containing folder, including nested previews.
+- Creating a directory file keeps the existing document open in the background and stays in directory navigation. Enter confirms the new name; Escape or confirming an empty name keeps the generated `Untitled` name (or the next available numbered name). Right from the selected file opens it through the normal document-opening flow; creation alone does not enter the document.
 - Pressing Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Move "[file name]" and all its contents to Trash?` before moving the entire `.fable` file to the system Trash. It can be restored using the operating system until Trash is emptied; a Trash failure leaves the document open and never falls back to permanent deletion.
 - The delete confirmation dialog shows centered rounded-pill Cancel and Move to Trash actions only; arrow keys move the highlighted selection between them and Enter activates the highlighted action.
 - Confirming deletion of the currently open `.fable` file closes that document and returns to the startup surface.
@@ -175,7 +178,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - In navigation mode, Tab+Up / Down → siblings
 - In navigation mode, Tab+Right → child
 - In navigation mode, Tab+Left → wrap the current level in a new parent
-- In navigation mode on a folder context card, Ctrl/Cmd+Right creates a new untitled `.fable` file in that folder.
+- In directory navigation, Ctrl/Cmd+Right, Ctrl/Cmd+Up, or Ctrl/Cmd+Down creates a new `.fable` file inside the selected folder or beside a selected child entry, starts inline naming, and waits for Right to open it.
 - Newly generated siblings, children, parents, and the first card in a new document all default to normal paragraph text.
 
 ### Clipboard

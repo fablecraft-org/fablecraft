@@ -211,13 +211,18 @@ animation: ~140ms ease-in-out
 - add Tauri commands for listing a Fable-aware directory view and creating an untitled `.fable` in a selected directory
 - add a Tauri command for renaming `.fable` documents; it appends `.fable` automatically, rejects empty names, path separators, non-`.fable` paths, and existing target files
 - add a Tauri command for deleting `.fable` documents; it rejects folders, non-`.fable` paths, and missing files, and is only called after a frontend confirmation dialog
-- show the active document's containing folder and current `.fable` file as distinct non-card nodes to the left of the root-card column, with `FOLDER` / `FABLE` labels
-- keep only the current `.fable` file node visible while the selected node is a real document card entered from the current-document node; when the card tree is entered from a folder preview, keep the selected folder and same-level folder/FABLE sibling column visible beside the document tree
+- render explorer nodes with `FOLDER` / `FABLE` labels only while an explorer selection is active; entering the writing tree hides the entire explorer layer without discarding its remembered location
+- `ExplorerCard` buttons use `tabIndex={-1}`; directory navigation prevents the default Tab/Shift+Tab action so DOM focus cannot drift away from the explorer selection. Rename and overlay guards run first, preserving their keyboard behavior.
+- render writing cards, empty-child targets, and overview connectors only for a writing-card selection. Selecting the current document or an open-file preview must not show writing content alongside directory entries; Right enters the writing tree at its normal centered position without an explorer column shift
+- `DocumentWorkspace` renders a fixed-position-in-workspace document name only when the selection is a writing card (including overview), using the current snapshot summary name with the document prop as fallback and omitting `.fable`; truncate long names
+- `.fc-document-title` sits above writing cards and below app overlays/drag region with pointer events disabled. Its background uses `--fc-color-app` and intersecting horizontal/vertical gradient masks: opaque under the full label, fading outside its left/right/bottom edges. Center the title horizontally with `left: 50%` and `translateX(-50%)`, symmetric padding, and a maximum width that reserves space on both sides for window controls. Centralize native-controls clearance (80px per side), font size, font weight (500), height, maximum width, padding, and fade distance in `uiTokens.documentTitle`
 - when a folder node is selected, hide the document card tree, keep its parent folder visible to the left when available, and show only child folders plus `.fable` files in the adjacent column
 - selected folder nodes load their parent directory through `listFableDirectory` and render its visible entries around the active folder in the same column; cancel stale parent-listing results when folder/selection changes, exclude locally deleted paths, and support same-level Up/Down and click navigation while keeping child entries to the right
 - when a child folder entry is selected, load that folder as a preview directory and render its folders plus `.fable` files in the next column to the right
 - preview directory entries must be selectable navigation targets so Right moves one explorer level at a time before entering the real document card tree
-- opening a visible `.fable` file uses the existing document open flow; creating a folder-level document uses the existing document create repository path; renaming the active document updates app state, the frontend snapshot summary path, and recent document storage
+- opening a visible `.fable` file uses the existing document open flow. `create_untitled_document_in_directory` creates the SQLite file through `DocumentRepository::create` without updating `AppState.current_document` or recording an open-document session; only opening the new file changes the active document. Renaming the active document updates app state, the frontend snapshot summary path, and recent document storage
+- directory creation resolves the target from the selected folder or the containing folder of a selected file/child-folder entry (including `preview-entry.parentPath`), reads the listing before creation, inserts/sorts the returned file locally, selects it, and starts inline rename with the generated name selected. A ref prevents duplicate in-flight creation. The app creation callback only announces creation and leaves the current summary, snapshot, interaction mode, and recent history unchanged
+- Enter commits a supplied name without opening the file; Escape or a whitespace-only name on a newly created file retains its generated name. Existing-file rename validation still rejects empty names. Right from the resulting explorer selection uses the normal save-before-open path
 
 ### Phase 8 — MCP
 - server scaffold
@@ -227,7 +232,7 @@ animation: ~140ms ease-in-out
 - Cargo `default-run` remains `fablecraft` so `npm run tauri dev` launches the desktop app binary instead of the MCP binary
 - read tools: `fablecraft_get_open_documents`, `fablecraft_get_document`, `fablecraft_get_card`, `fablecraft_get_subtree`
 - mutation tools: `fablecraft_set_card_text`, `fablecraft_create_child`, `fablecraft_create_sibling_before`, `fablecraft_create_sibling_after`, `fablecraft_move_card`, `fablecraft_wrap_level_in_parent`, `fablecraft_delete_card`
-- desktop open/create writes a small process-keyed session file in the OS temp directory so external MCP clients can discover active `.fable` document paths without talking to the running Tauri process
+- desktop open/create-and-open writes a small process-keyed session file in the OS temp directory so external MCP clients can discover active `.fable` document paths without talking to the running Tauri process
 - local developer MCP invocation accepts the same `documentPath` and id-bearing argument payloads as the external stdio server; legacy active-card request fields remain supported only as a compatibility fallback
 - MCP mutation responses are lightweight status payloads and do not include a full persisted `DocumentSnapshot`
 - `get_document` returns `treeDepthCounts`; `get_card` returns ordered direct `childCardIds`
@@ -258,11 +263,11 @@ animation: ~140ms ease-in-out
 - Folder context shows only child folders and `.fable` files; non-`.fable` files are hidden.
 - The shared Rust directory-listing helper excludes dot-prefixed child directories before returning entries, applying the same visibility rule to folder context and nested previews; dots elsewhere in folder names remain visible.
 - Up/Down in folder context moves through visible folder entries, Right enters folders or opens `.fable` files, and Enter renames selected `.fable` files.
-- Ctrl/Cmd+Right on a folder context card creates the next available untitled `.fable` document in that folder.
+- Ctrl/Cmd+Right, Ctrl/Cmd+Up, or Ctrl/Cmd+Down anywhere in directory navigation creates the next available untitled `.fable` file inside the selected folder or beside the selected child entry, starts inline naming, and opens only after a subsequent Right.
 - Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Move "[file name]" and all its contents to Trash?` before moving the entire `.fable` file to the system Trash. It can be restored using the operating system until Trash is emptied; a Trash failure leaves the document open and never falls back to permanent deletion.
 - the delete confirmation dialog omits warning/footer helper copy, centers rounded-pill Cancel and Move to Trash actions, lets arrow keys move the highlighted selection between actions, and activates the highlighted action with Enter
 - confirming deletion of the currently open `.fable` file closes the active document and returns to startup
-- shuffle, merge, indent, outdent, and text-entry commands do not mutate folder or `.fable` document context cards; FABLE document renaming and confirmed FABLE deletion are the only filename mutations in folder context.
+- shuffle, merge, indent, outdent, and text-entry commands do not mutate folder or `.fable` document context cards; directory file creation, FABLE document renaming, and confirmed FABLE deletion are the supported file mutations in folder context.
 - typing any printable character enters edit mode and forwards that character into the editor
 - Tab+ArrowUp / Down / Right / Left create siblings, children, and wrapped parents in navigation mode
 - Shift+Up / Down moves within the packed column, can reorder root cards, and may reparent a card when crossing into a neighboring parent group
@@ -432,7 +437,7 @@ animation: ~140ms ease-in-out
 - the desktop app checks the same signed updater manifest shortly after startup and through manual Check for Updates actions
 - `.env.example` documents the required website env vars for Vercel or other static hosting
 - maintainers publish a new website-backed macOS download by pushing a `v*` tag that matches the desktop version and letting the GitHub Actions workflow attach the renamed DMG asset to the release
-- Release `v0.3.0` keeps the version synchronized across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; user-facing changes are recorded in `docs/releases/v0.3.0.md`.
+- Release `v0.4.0` keeps the version synchronized across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; user-facing changes are recorded in `docs/releases/v0.4.0.md`.
 - CI's macOS check and the Apple Silicon release job run on GitHub's `macos-15` runner. The retired `macos-14` label must not be used: scheduled retirement brownouts prevent jobs from starting, including the signing/notarization release job.
 - website runtime detection must not invoke desktop updater behavior in browser builds
 
