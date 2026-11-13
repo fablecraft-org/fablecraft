@@ -82,6 +82,22 @@ body[data-fc-runtime="web"] {
   padding-right: var(--fc-card-identity-title-reserve);
 }
 
+.fc-passage-anchor {
+  background: var(--fc-color-passage-highlight);
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.fc-passage-anchor-active {
+  background: var(--fc-color-passage-highlight-active);
+  color: var(--fc-color-passage-highlight-text);
+}
+
+.fc-passage-anchor:focus-visible {
+  outline: 1px solid var(--fc-color-focus);
+}
+
 .fc-document-title {
   position: absolute;
   top: 0;

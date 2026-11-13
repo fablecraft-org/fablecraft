@@ -7,6 +7,7 @@ export type NativeMenuAction =
   | "create-above"
   | "create-below"
   | "create-child"
+  | "create-anchored-child"
   | "create-parent"
   | "enable-claude-desktop"
   | "enable-codex"

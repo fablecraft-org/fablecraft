@@ -149,6 +149,34 @@ describe("TreeCardButton", () => {
     act(() => { root.unmount(); });
   });
 
+  it("shows grey/yellow passage states and opens anchors without selecting the containing card", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const selected: string[] = [];
+    const contentJson = JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [
+      { type: "text", text: "A source passage", marks: [{ type: "passageAnchor", attrs: { childCardId: "child" } }] },
+    ] }] });
+    const render = (activeAnchoredChildId?: string) => act(() => {
+      root.render(<TreeCardButton borderColor="transparent" cardLabel="A01"
+        contentJson={contentJson} activeAnchoredChildId={activeAnchoredChildId}
+        onOpenAnchoredChild={(id) => selected.push(id)} onClick={() => selected.push("source")}
+        x={0} y={0} />);
+    });
+    render();
+    const passage = () => container.querySelector(".fc-passage-anchor") as HTMLElement;
+    expect(passage().textContent).toBe("A source passage");
+    expect(passage().classList.contains("fc-passage-anchor-active")).toBe(false);
+    act(() => { passage().click(); });
+    expect(selected).toEqual(["child"]);
+    render("child");
+    expect(passage().classList.contains("fc-passage-anchor-active")).toBe(true);
+    act(() => { passage().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" })); });
+    expect(selected).toEqual(["child", "child"]);
+    render("different-child");
+    expect(passage().classList.contains("fc-passage-anchor-active")).toBe(false);
+    act(() => { root.unmount(); });
+  });
+
   it("measures layout height instead of transformed bounding height", () => {
     HTMLElement.prototype.getBoundingClientRect = () => mockRect(148);
     mockLayoutHeight(180);

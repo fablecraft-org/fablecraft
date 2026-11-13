@@ -1,6 +1,11 @@
 import { Fragment, type ReactNode } from "react";
 import { contentText } from "../domain/document/content";
 
+interface AnchorPresentation {
+  activeAnchoredChildId?: string;
+  onOpenAnchoredChild?: (childId: string) => void;
+}
+
 interface PreviewMark {
   attrs?: Record<string, unknown>;
   type?: string;
@@ -22,8 +27,31 @@ function parsePreviewDocument(contentJson: string) {
   }
 }
 
-function applyMarks(content: ReactNode, marks: PreviewMark[]) {
+function applyMarks(content: ReactNode, marks: PreviewMark[], anchors: AnchorPresentation) {
   return marks.reduce<ReactNode>((wrappedContent, mark, index) => {
+    if (mark.type === "passageAnchor" && typeof mark.attrs?.childCardId === "string") {
+      const childId = mark.attrs.childCardId;
+      const open = () => anchors.onOpenAnchoredChild?.(childId);
+      return (
+        <span
+          className={`fc-passage-anchor${anchors.activeAnchoredChildId === childId ? " fc-passage-anchor-active" : ""}`}
+          data-fc-child-id={childId}
+          key={`anchor-${index}`}
+          role="link"
+          tabIndex={anchors.onOpenAnchoredChild ? 0 : undefined}
+          aria-label="Open associated child card"
+          onClick={(event) => { event.stopPropagation(); open(); }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              open();
+            }
+          }}
+        >{wrappedContent}</span>
+      );
+    }
+
     if (mark.type === "bold") {
       return <strong key={`bold-${index}`}>{wrappedContent}</strong>;
     }
@@ -59,15 +87,15 @@ function applyMarks(content: ReactNode, marks: PreviewMark[]) {
   }, content);
 }
 
-function renderChildren(nodes: PreviewNode[], keyPrefix: string) {
-  return nodes.map((node, index) => renderNode(node, `${keyPrefix}-${index}`));
+function renderChildren(nodes: PreviewNode[], keyPrefix: string, anchors: AnchorPresentation) {
+  return nodes.map((node, index) => renderNode(node, `${keyPrefix}-${index}`, anchors));
 }
 
-function renderNode(node: PreviewNode, key: string): ReactNode {
+function renderNode(node: PreviewNode, key: string, anchors: AnchorPresentation): ReactNode {
   if (node.type === "text") {
     return (
       <Fragment key={key}>
-        {applyMarks(node.text ?? "", node.marks ?? [])}
+        {applyMarks(node.text ?? "", node.marks ?? [], anchors)}
       </Fragment>
     );
   }
@@ -76,7 +104,7 @@ function renderNode(node: PreviewNode, key: string): ReactNode {
     return <br key={key} />;
   }
 
-  const children = renderChildren(node.content ?? [], key);
+  const children = renderChildren(node.content ?? [], key, anchors);
 
   if (node.type === "doc") {
     return <Fragment key={key}>{children}</Fragment>;
@@ -154,7 +182,7 @@ function renderNode(node: PreviewNode, key: string): ReactNode {
   return <Fragment key={key}>{children}</Fragment>;
 }
 
-interface CardContentPreviewProps {
+interface CardContentPreviewProps extends AnchorPresentation {
   contentJson: string;
   placeholder?: string;
 }
@@ -162,6 +190,8 @@ interface CardContentPreviewProps {
 export function CardContentPreview({
   contentJson,
   placeholder = "",
+  activeAnchoredChildId,
+  onOpenAnchoredChild,
 }: CardContentPreviewProps) {
   const fallbackText = contentText(contentJson);
 
@@ -185,7 +215,7 @@ export function CardContentPreview({
 
   return (
     <div className="fc-editor fc-preview text-[length:var(--fc-content-size)] leading-[var(--fc-content-line-height)] text-[var(--fc-color-text)]">
-      {renderNode(previewDocument, "root")}
+      {renderNode(previewDocument, "root", { activeAnchoredChildId, onOpenAnchoredChild })}
     </div>
   );
 }

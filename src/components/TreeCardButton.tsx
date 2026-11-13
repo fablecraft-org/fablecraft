@@ -8,6 +8,8 @@ interface TreeCardButtonProps {
   cardLabel?: string;
   contentJson: string;
   descendantCount?: number;
+  activeAnchoredChildId?: string;
+  onOpenAnchoredChild?: (childId: string) => void;
   placeholder?: string;
   isActive?: boolean;
   onMeasureHeight?: (height: number) => void;
@@ -25,6 +27,8 @@ export function TreeCardButton({
   cardLabel,
   contentJson,
   descendantCount = 0,
+  activeAnchoredChildId,
+  onOpenAnchoredChild,
   placeholder = "",
   isActive = false,
   onMeasureHeight,
@@ -112,7 +116,8 @@ export function TreeCardButton({
           {contentTitlePreview(contentJson)}
         </p>
       ) : (
-        <CardContentPreview contentJson={contentJson} placeholder={placeholder} />
+        <CardContentPreview contentJson={contentJson} placeholder={placeholder}
+          activeAnchoredChildId={activeAnchoredChildId} onOpenAnchoredChild={onOpenAnchoredChild} />
       )}
     </div>
   );

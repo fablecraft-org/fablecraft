@@ -1,4 +1,5 @@
 import type { CardContentRecord, CardRecord, DocumentSnapshot, EditableDocumentSnapshot, RevisionRecord } from "./types";
+import { normalizePassageAnchors } from "./passageAnchors";
 
 function compareNullableStrings(left: string | null, right: string | null) {
   if (left === right) {
@@ -45,7 +46,7 @@ export function normalizeEditableDocumentSnapshot(
 ): EditableDocumentSnapshot {
   return {
     cards: normalizeCards(snapshot.cards),
-    contents: normalizeContents(snapshot.contents),
+    contents: normalizeContents(normalizePassageAnchors(snapshot.cards, snapshot.contents)),
     documentId: snapshot.documentId,
   };
 }
@@ -53,7 +54,7 @@ export function normalizeEditableDocumentSnapshot(
 export function normalizeDocumentSnapshot(snapshot: DocumentSnapshot): DocumentSnapshot {
   return {
     cards: normalizeCards(snapshot.cards),
-    contents: normalizeContents(snapshot.contents),
+    contents: normalizeContents(normalizePassageAnchors(snapshot.cards, snapshot.contents)),
     revisions: normalizeRevisions(snapshot.revisions),
     summary: snapshot.summary,
   };

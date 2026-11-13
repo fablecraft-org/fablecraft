@@ -25,6 +25,7 @@ const CARD_SHIFT_UP: &str = "card.shift_up";
 const CARD_SHIFT_DOWN: &str = "card.shift_down";
 const CARD_SPLIT: &str = "card.split";
 const CARD_CREATE_CHILD: &str = "card.create_child";
+const CARD_CREATE_ANCHORED_CHILD: &str = "card.create_anchored_child";
 const CARD_CREATE_PARENT: &str = "card.create_parent";
 const CARD_CREATE_ABOVE: &str = "card.create_above";
 const CARD_CREATE_BELOW: &str = "card.create_below";
@@ -94,6 +95,9 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .build(app)?;
     let create_child = MenuItemBuilder::with_id(CARD_CREATE_CHILD, "Create Child")
         .accelerator("CmdOrCtrl+Right")
+        .build(app)?;
+    let create_anchored_child = MenuItemBuilder::with_id(CARD_CREATE_ANCHORED_CHILD, "Create Child from Passage")
+        .accelerator("CmdOrCtrl+Alt+M")
         .build(app)?;
     let create_parent = MenuItemBuilder::with_id(CARD_CREATE_PARENT, "Create Parent")
         .accelerator("CmdOrCtrl+Left")
@@ -177,6 +181,7 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .item(&split)
         .separator()
         .item(&create_child)
+        .item(&create_anchored_child)
         .item(&create_parent)
         .item(&create_above)
         .item(&create_below)
@@ -245,6 +250,7 @@ pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent
         CARD_SHIFT_DOWN => emit_action(app, "shift-down"),
         CARD_SPLIT => emit_action(app, "split"),
         CARD_CREATE_CHILD => emit_action(app, "create-child"),
+        CARD_CREATE_ANCHORED_CHILD => emit_action(app, "create-anchored-child"),
         CARD_CREATE_PARENT => emit_action(app, "create-parent"),
         CARD_CREATE_ABOVE => emit_action(app, "create-above"),
         CARD_CREATE_BELOW => emit_action(app, "create-below"),

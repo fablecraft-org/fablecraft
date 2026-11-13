@@ -2,11 +2,14 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import StarterKit from "@tiptap/starter-kit";
 import { TextSelection } from "@tiptap/pm/state";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import { useEffect, useRef } from "react";
 import { trimTrailingEmptyParagraphs } from "../domain/document/content";
 import { EMPTY_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
 import type { SplitCardContent } from "../domain/document/split";
 import { listenForFrontendMenuActions } from "../lib/nativeMenu";
+import { PassageAnchorMark } from "./passageAnchorMark";
+import { PASSAGE_ANCHOR_MARK } from "../domain/document/passageAnchors";
 
 interface CardEditorProps {
   canLeaveEditing?: boolean;
@@ -14,6 +17,9 @@ interface CardEditorProps {
   contentJson: string;
   focusPlacement?: "start" | "end" | null;
   onCreateChild: () => void;
+  onCreateAnchoredChild?: (contentForChild: (childId: string) => string) => void;
+  onOpenAnchoredChild?: (childId: string) => void;
+  onPassageAnchorError?: (message: string) => void;
   onCreateParentLevel: () => void;
   onCreateSiblingAbove: () => void;
   onCreateSiblingBelow: () => void;
@@ -31,7 +37,7 @@ interface CardEditorProps {
   onNavigateParent: (placement?: "start" | "end") => boolean;
   pendingTextInput?: string | null;
   onRequestNavigation: () => void;
-  onSplitAtSelection: (selectionStart: number, selectionEnd: number) => void;
+  onSplitAtSelection: (selectionStart: number, selectionEnd: number, richSplit?: SplitCardContent) => void;
   onUndo: () => void;
   onUpdateContent: (contentJson: string) => void;
   placeholder?: string;
@@ -151,6 +157,9 @@ export function CardEditor({
   contentJson,
   focusPlacement = null,
   onCreateChild,
+  onCreateAnchoredChild,
+  onOpenAnchoredChild,
+  onPassageAnchorError,
   onCreateParentLevel,
   onCreateSiblingAbove,
   onCreateSiblingBelow,
@@ -178,6 +187,46 @@ export function CardEditor({
   const wasEditingRef = useRef(false);
   const editorRef = useRef<Editor | null>(null);
   const isTabHeld = () => tabHeldRef.current || tabKeyHeldAcrossEditors;
+  function createOrOpenPassageAnchor(currentEditor: Editor) {
+    const { state } = currentEditor;
+    const { from, to, empty, $from } = state.selection;
+    if (empty) {
+      const anchor = $from.marks().find((mark) => mark.type.name === PASSAGE_ANCHOR_MARK);
+      if (anchor) onOpenAnchoredChild?.(anchor.attrs.childCardId);
+      return;
+    }
+    const existingIds = new Set<string>();
+    let hasUnanchoredText = false;
+    let unsupportedFormatting = false;
+    const anchorType = state.schema.marks[PASSAGE_ANCHOR_MARK]!;
+    state.doc.nodesBetween(from, to, (node, _position, parent) => {
+      if (!node.isText) return;
+      if (!parent?.type.allowsMarkType(anchorType) || node.marks.some((mark) => mark.type.excludes(anchorType))) {
+        unsupportedFormatting = true;
+      }
+      const anchor = node.marks.find((mark) => mark.type.name === PASSAGE_ANCHOR_MARK);
+      if (anchor) existingIds.add(anchor.attrs.childCardId);
+      else hasUnanchoredText = true;
+    });
+    if (existingIds.size === 1 && !hasUnanchoredText) {
+      onOpenAnchoredChild?.([...existingIds][0]!);
+      return;
+    }
+    if (existingIds.size > 0) {
+      onPassageAnchorError?.("Choose a passage that does not overlap an existing highlighted passage.");
+      return;
+    }
+    if (unsupportedFormatting) {
+      onPassageAnchorError?.("Choose a passage outside code formatting to create an associated child.");
+      return;
+    }
+    if (!canCreateStructure || !state.doc.textBetween(from, to).trim()) return;
+    // Build the marked document without dispatching: the workspace commits the
+    // source text and new child together as one editing-history operation.
+    onCreateAnchoredChild?.((childCardId) => JSON.stringify(
+      state.tr.addMark(from, to, anchorType.create({ childCardId })).doc.toJSON(),
+    ));
+  }
   const editor = useEditor({
     autofocus: false,
     content: JSON.parse(contentJson),
@@ -186,11 +235,37 @@ export function CardEditor({
         class:
           "fc-editor w-full min-h-[1.5rem] outline-none font-[var(--fc-font-content)] text-[length:var(--fc-content-size)] leading-[var(--fc-content-line-height)] text-[var(--fc-color-text)]",
       },
+      handleDOMEvents: {
+        click(_, event) {
+          const target = event.target instanceof Element
+            ? event.target.closest<HTMLElement>("[data-fc-child-id]") : null;
+          const childId = target?.dataset.fcChildId;
+          if (!childId || !onOpenAnchoredChild) return false;
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenAnchoredChild(childId);
+          return true;
+        },
+      },
+      transformPasted(slice) {
+        // Rich-text paste copies prose, never a reference into the source tree.
+        const strip = (fragment: Fragment): Fragment =>
+          Fragment.fromArray(fragment.content.map((node) =>
+            node.copy(strip(node.content)).mark(node.marks.filter((mark) => mark.type.name !== PASSAGE_ANCHOR_MARK))));
+        return new Slice(strip(slice.content), slice.openStart, slice.openEnd);
+      },
       handleKeyDown(_, event): boolean {
         const currentEditor = editorRef.current;
 
         if (!currentEditor) {
           return false;
+        }
+
+        if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey &&
+          (event.code === "KeyM" || event.key.toLowerCase() === "m")) {
+          event.preventDefault();
+          createOrOpenPassageAnchor(currentEditor);
+          return true;
         }
 
         if (event.key === "Escape") {
@@ -238,7 +313,7 @@ export function CardEditor({
 
         if (isTabHeld() && event.key === "ArrowUp") {
           event.preventDefault();
-          if (!onNavigateAbove("end") && canCreateStructure) {
+          if (canCreateStructure) {
             onCreateSiblingAbove();
           }
           return true;
@@ -246,7 +321,7 @@ export function CardEditor({
 
         if (isTabHeld() && event.key === "ArrowDown") {
           event.preventDefault();
-          if (!onNavigateBelow("end") && canCreateStructure) {
+          if (canCreateStructure) {
             onCreateSiblingBelow();
           }
           return true;
@@ -254,7 +329,11 @@ export function CardEditor({
 
         if (isTabHeld() && event.key === "ArrowRight") {
           event.preventDefault();
-          if (!onNavigateChild("end") && canCreateStructure) {
+          if (!currentEditor.state.selection.empty) {
+            createOrOpenPassageAnchor(currentEditor);
+            return true;
+          }
+          if (canCreateStructure) {
             onCreateChild();
           }
           return true;
@@ -262,7 +341,7 @@ export function CardEditor({
 
         if (isTabHeld() && event.key === "ArrowLeft") {
           event.preventDefault();
-          if (!onNavigateParent("end") && canCreateStructure) {
+          if (canCreateStructure) {
             onCreateParentLevel();
           }
           return true;
@@ -351,7 +430,10 @@ export function CardEditor({
             }
 
             const offsets = selectionTextOffsets(currentEditor);
-            onSplitAtSelection(offsets.start, offsets.end);
+            onSplitAtSelection(offsets.start, offsets.end,
+              JSON.stringify(currentEditor.getJSON()).includes(PASSAGE_ANCHOR_MARK)
+                ? contentAroundDivide(currentEditor, currentEditor.state.selection.from, currentEditor.state.selection.to)
+                : undefined);
             return true;
           }
 
@@ -430,6 +512,7 @@ export function CardEditor({
       },
     },
     extensions: [
+      PassageAnchorMark,
       Placeholder.configure({
         emptyEditorClass: "is-editor-empty",
         placeholder,
@@ -505,6 +588,10 @@ export function CardEditor({
     }
 
     return listenForFrontendMenuActions((action) => {
+      if (action === "create-anchored-child") {
+        createOrOpenPassageAnchor(editor);
+        return;
+      }
       if (action === "undo") {
         onUndo();
         return;
@@ -517,10 +604,14 @@ export function CardEditor({
 
       if (action === "split" && canCreateStructure) {
         const offsets = selectionTextOffsets(editor);
-        onSplitAtSelection(offsets.start, offsets.end);
+        onSplitAtSelection(offsets.start, offsets.end,
+          JSON.stringify(editor.getJSON()).includes(PASSAGE_ANCHOR_MARK)
+            ? contentAroundDivide(editor, editor.state.selection.from, editor.state.selection.to)
+            : undefined);
       }
     });
-  }, [canCreateStructure, editor, isEditing, onRedo, onSplitAtSelection, onUndo]);
+  }, [canCreateStructure, editor, isEditing, onRedo, onSplitAtSelection, onUndo,
+    onCreateAnchoredChild, onOpenAnchoredChild, onPassageAnchorError]);
 
   if (!editor) {
     return null;

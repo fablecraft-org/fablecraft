@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::error::{AppError, AppErrorPayload, AppResult};
 
 mod migrations;
+mod passage_anchors;
 
 const DEFAULT_CARD_TYPE: &str = "card";
 const NEW_CARD_EDITOR_DOCUMENT: &str =
@@ -181,7 +182,7 @@ impl DocumentRepository {
 
     fn save_inner(
         path: PathBuf,
-        snapshot: EditableDocumentSnapshot,
+        mut snapshot: EditableDocumentSnapshot,
     ) -> AppResult<SaveDocumentResult> {
         validate_fable_path(&path)?;
 
@@ -197,6 +198,7 @@ impl DocumentRepository {
 
         let existing_document_id = document_id(&connection)?;
         validate_snapshot(&snapshot, &existing_document_id)?;
+        passage_anchors::normalize(&snapshot.cards, &mut snapshot.contents);
 
         let saved_at_ms = now_ms()?;
         let revision_id = Uuid::new_v4().to_string();
@@ -326,7 +328,8 @@ fn seed_document(connection: &mut Connection) -> AppResult<()> {
 fn build_document_snapshot(connection: &Connection, path: &Path) -> AppResult<DocumentSnapshot> {
     let summary = summarize_document(connection, path)?;
     let cards = load_cards(connection, &summary.document_id)?;
-    let contents = load_contents(connection)?;
+    let mut contents = load_contents(connection)?;
+    passage_anchors::normalize(&cards, &mut contents);
     let revisions = load_revisions(connection)?;
 
     Ok(DocumentSnapshot {
@@ -808,6 +811,40 @@ mod tests {
         assert_eq!(reopened.revisions[0].id, result.revision_id);
 
         fs::remove_file(path).expect("temp file should be removable");
+    }
+
+    #[test]
+    fn passage_anchors_round_trip_content_and_revisions_and_clean_deleted_targets() {
+        let path = temp_document_path("passage-anchors");
+        DocumentRepository::create(path.clone()).unwrap();
+        let snapshot = DocumentRepository::load(path.clone()).unwrap();
+        let root = snapshot.cards[0].clone();
+        let mut editable = EditableDocumentSnapshot {
+            document_id: snapshot.summary.document_id.clone(),
+            cards: vec![root.clone(), CardRecord {
+                id: "anchored-child".into(), document_id: snapshot.summary.document_id,
+                parent_id: Some(root.id.clone()), order_index: 0, card_type: DEFAULT_CARD_TYPE.into(),
+            }],
+            contents: vec![
+                CardContentRecord { card_id: root.id.clone(), content_json: serde_json::json!({
+                    "type":"doc", "content":[{"type":"paragraph","content":[{"type":"text","text":"A passage", "marks":[
+                        {"type":"passageAnchor","attrs":{"childCardId":"anchored-child"}}
+                    ]}]}]
+                }).to_string() },
+                CardContentRecord { card_id: "anchored-child".into(), content_json: EMPTY_EDITOR_DOCUMENT.into() },
+            ],
+        };
+        DocumentRepository::save(path.clone(), editable.clone()).unwrap();
+        let loaded = DocumentRepository::load(path.clone()).unwrap();
+        assert!(loaded.contents.iter().find(|content| content.card_id == root.id).unwrap().content_json.contains("passageAnchor"));
+        assert!(loaded.revisions[0].snapshot.contains("passageAnchor"));
+        editable.cards.retain(|card| card.id != "anchored-child");
+        editable.contents.retain(|content| content.card_id != "anchored-child");
+        DocumentRepository::save(path.clone(), editable).unwrap();
+        let loaded = DocumentRepository::load(path.clone()).unwrap();
+        assert!(!loaded.contents[0].content_json.contains("passageAnchor"));
+        assert!(!loaded.revisions[0].snapshot.contains("passageAnchor"));
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
