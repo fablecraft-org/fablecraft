@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardEditor } from "../src/components/CardEditor";
 import { contentJsonForPlainText, contentText } from "../src/domain/document/content";
 import { NEW_CARD_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
+import { dispatchNativeMenuAction } from "../src/lib/nativeMenu";
 
 const EMPTY_HEADING_JSON = JSON.stringify({
   type: "doc",
@@ -75,7 +76,144 @@ describe("CardEditor keyboard behavior", () => {
     document.body.innerHTML = "";
   });
 
-  it("uses Tab+ArrowDown to navigate below instead of creating a sibling", async () => {
+  it.each(["shortcut", "tab", "native-menu"])("creates an anchored selection through %s without separately saving the source mark", async (trigger) => {
+    const onCreateAnchoredChild = vi.fn();
+    const { container, props, root } = renderEditor({ onCreateAnchoredChild });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.setTextSelection({ from: 1, to: 6 });
+      vi.mocked(props.onUpdateContent).mockClear();
+      if (trigger === "native-menu") {
+        dispatchNativeMenuAction("create-anchored-child");
+        return;
+      }
+      if (trigger === "tab") element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
+      element.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true, cancelable: true,
+        key: trigger === "tab" ? "ArrowRight" : "µ", code: trigger === "tab" ? "ArrowRight" : "KeyM",
+        metaKey: trigger === "shortcut", altKey: trigger === "shortcut",
+      }));
+    });
+    expect(onCreateAnchoredChild).toHaveBeenCalledTimes(1);
+    const contentForChild = onCreateAnchoredChild.mock.lastCall![0];
+    const marked = contentForChild("new-child");
+    expect(contentText(marked)).toBe("Hello world");
+    expect(JSON.parse(marked).content[0].content[0]).toMatchObject({
+      text: "Hello", marks: [{ type: "passageAnchor", attrs: { childCardId: "new-child" } }],
+    });
+    expect(props.onUpdateContent).not.toHaveBeenCalled();
+    expect(props.onNavigateChild).not.toHaveBeenCalled();
+    expect(props.onCreateChild).not.toHaveBeenCalled();
+    await act(async () => { root.unmount(); });
+  });
+
+  it("renders persistent anchors, opens their target and rejects overlapping selection", async () => {
+    const contentJson = JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [
+      { type: "text", text: "Hello", marks: [{ type: "passageAnchor", attrs: { childCardId: "child" } }] },
+      { type: "text", text: " world" },
+    ] }] });
+    const onOpenAnchoredChild = vi.fn();
+    const onPassageAnchorError = vi.fn();
+    const onCreateAnchoredChild = vi.fn();
+    const { container, props, root } = renderEditor({ contentJson, onOpenAnchoredChild, onPassageAnchorError, onCreateAnchoredChild });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    const command = () => element.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true, cancelable: true, code: "KeyM", key: "m", metaKey: true, altKey: true,
+    }));
+    expect(element.querySelector(".fc-passage-anchor")?.textContent).toBe("Hello");
+    await act(async () => { element.editor.commands.setTextSelection(3); });
+    expect(element.querySelector(".fc-passage-anchor-active")?.textContent).toBe("Hello");
+    await act(async () => { command(); });
+    expect(onOpenAnchoredChild).toHaveBeenLastCalledWith("child");
+    await act(async () => { element.editor.commands.setTextSelection(10); });
+    expect(element.querySelector(".fc-passage-anchor-active")).toBeNull();
+    await act(async () => { (element.querySelector(".fc-passage-anchor") as HTMLElement).click(); });
+    expect(onOpenAnchoredChild).toHaveBeenLastCalledWith("child");
+    await act(async () => {
+      element.editor.commands.setTextSelection({ from: 3, to: 9 });
+      command();
+    });
+    expect(onPassageAnchorError).toHaveBeenCalledTimes(1);
+    expect(onCreateAnchoredChild).not.toHaveBeenCalled();
+    await act(async () => { root.unmount(); });
+  });
+
+  it("keeps anchor marks through text edits and rich splits, strips them from pasted prose", async () => {
+    const contentJson = JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [
+      { type: "text", text: "Hello", marks: [{ type: "bold" }, { type: "passageAnchor", attrs: { childCardId: "child" } }] },
+      { type: "text", text: " world" },
+    ] }] });
+    const { container, props, root } = renderEditor({ contentJson });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    const { editor } = element;
+    await act(async () => {
+      editor.commands.setTextSelection(3);
+      editor.commands.insertContent("X");
+    });
+    expect(element.querySelector(".fc-passage-anchor")?.textContent).toBe("HeXllo");
+    const selection = editor.state.doc.slice(1, 7);
+    let transformed = selection;
+    editor.view.someProp("transformPasted", (transform) => { transformed = transform(selection, editor.view, false); });
+    expect(JSON.stringify(transformed.toJSON())).not.toContain("passageAnchor");
+    expect(JSON.stringify(transformed.toJSON())).toContain("bold");
+    await act(async () => {
+      editor.commands.setTextSelection(8);
+      element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
+      element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+    });
+    const richSplit = vi.mocked(props.onSplitAtSelection).mock.lastCall?.[2];
+    expect(richSplit?.before).toContain("passageAnchor");
+    expect(contentText(richSplit?.before ?? "")).toBe("HeXllo ");
+    await act(async () => { root.unmount(); });
+  });
+
+  it("rejects code selections without creating an unanchored child or losing formatting", async () => {
+    const contentJson = JSON.stringify({ type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "Code" }] }] });
+    const onCreateAnchoredChild = vi.fn();
+    const onPassageAnchorError = vi.fn();
+    const { container, props, root } = renderEditor({ contentJson, onCreateAnchoredChild, onPassageAnchorError });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.setTextSelection({ from: 1, to: 5 });
+      dispatchNativeMenuAction("create-anchored-child");
+    });
+    expect(onCreateAnchoredChild).not.toHaveBeenCalled();
+    expect(onPassageAnchorError).toHaveBeenCalledTimes(1);
+    expect(element.querySelector("pre")?.textContent).toBe("Code");
+    await act(async () => { root.unmount(); });
+  });
+
+  it.each(([
+    { key: "ArrowUp", create: "onCreateSiblingAbove", navigate: "onNavigateAbove" },
+    { key: "ArrowDown", create: "onCreateSiblingBelow", navigate: "onNavigateBelow" },
+    { key: "ArrowLeft", create: "onCreateParentLevel", navigate: "onNavigateParent" },
+    { key: "ArrowRight", create: "onCreateChild", navigate: "onNavigateChild" },
+  ] as const).flatMap((direction) => [true, false].map((canCreateStructure) => ({ ...direction, canCreateStructure }))))(
+    "Tab+$key creates instead of navigating when creation is allowed=$canCreateStructure", async ({ key, create, navigate, canCreateStructure }) => {
+      const { container, props, root } = renderEditor({
+        canCreateStructure,
+        onNavigateAbove: vi.fn(() => true),
+        onNavigateBelow: vi.fn(() => true),
+        onNavigateParent: vi.fn(() => true),
+        onNavigateChild: vi.fn(() => true),
+      });
+      await act(async () => { root.render(<CardEditor {...props} />); });
+      const element = container.querySelector(".ProseMirror") as HTMLElement;
+      await act(async () => {
+        element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab", cancelable: true }));
+        element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key, cancelable: true }));
+      });
+      expect(props[create]).toHaveBeenCalledTimes(canCreateStructure ? 1 : 0);
+      expect(props[navigate]).not.toHaveBeenCalled();
+      await act(async () => { root.unmount(); });
+    },
+  );
+
+  it("uses Tab+ArrowDown to create a sibling even when a card exists below", async () => {
     const { container, props, root } = renderEditor({
       onNavigateBelow: vi.fn(() => true),
     });
@@ -103,9 +241,8 @@ describe("CardEditor keyboard behavior", () => {
       );
     });
 
-    expect(props.onNavigateBelow).toHaveBeenCalledTimes(1);
-    expect(props.onNavigateBelow).toHaveBeenCalledWith("end");
-    expect(props.onCreateSiblingBelow).not.toHaveBeenCalled();
+    expect(props.onNavigateBelow).not.toHaveBeenCalled();
+    expect(props.onCreateSiblingBelow).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       root.unmount();
@@ -170,8 +307,7 @@ describe("CardEditor keyboard behavior", () => {
       );
     });
 
-    expect(props.onNavigateChild).toHaveBeenCalledTimes(1);
-    expect(props.onNavigateChild).toHaveBeenCalledWith("end");
+    expect(props.onNavigateChild).not.toHaveBeenCalled();
     expect(props.onCreateChild).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -684,7 +820,7 @@ describe("CardEditor keyboard behavior", () => {
     });
   });
 
-  it("uses Tab+ArrowRight to navigate to a child at the end of its text", async () => {
+  it("uses Tab+ArrowRight to create a child even when a child already exists", async () => {
     const { container, props, root } = renderEditor({
       onNavigateChild: vi.fn(() => true),
     });
@@ -712,15 +848,15 @@ describe("CardEditor keyboard behavior", () => {
       );
     });
 
-    expect(props.onNavigateChild).toHaveBeenCalledTimes(1);
-    expect(props.onNavigateChild).toHaveBeenCalledWith("end");
+    expect(props.onNavigateChild).not.toHaveBeenCalled();
+    expect(props.onCreateChild).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       root.unmount();
     });
   });
 
-  it("keeps Tab-held navigation active after the editor remounts", async () => {
+  it("keeps Tab-held creation active after the editor remounts", async () => {
     const firstProps = renderEditor({
       onNavigateBelow: vi.fn(() => true),
     });
@@ -769,9 +905,10 @@ describe("CardEditor keyboard behavior", () => {
       );
     });
 
-    expect(firstProps.props.onNavigateBelow).toHaveBeenCalledWith("end");
-    expect(secondProps.onNavigateChild).toHaveBeenCalledTimes(1);
-    expect(secondProps.onNavigateChild).toHaveBeenCalledWith("end");
+    expect(firstProps.props.onNavigateBelow).not.toHaveBeenCalled();
+    expect(firstProps.props.onCreateSiblingBelow).toHaveBeenCalledTimes(1);
+    expect(secondProps.onNavigateChild).not.toHaveBeenCalled();
+    expect(secondProps.onCreateChild).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       firstProps.root.unmount();

@@ -1241,6 +1241,26 @@ export function DocumentWorkspace({
     return focusCardForEditing(newCardId, "end");
   }
 
+  function openAnchoredChild(sourceCardId: string, childId: string) {
+    const snapshot = useDocumentStore.getState().snapshot;
+    if (!snapshot?.cards.some((card) => card.id === childId && card.parentId === sourceCardId)) return;
+    preserveDocumentTreeExplorerContext();
+    rememberChild(sourceCardId, childId);
+    focusCardForEditing(childId);
+  }
+
+  function createAnchoredChild(contentForChild: (childId: string) => string) {
+    if (!selectedCard || !canCreateStructure) return;
+    const sourceCardId = selectedCard.id;
+    const childId = randomId("card");
+    updateSnapshot((snapshot) => replaceCardContent(
+      createChildCard(snapshot, sourceCardId, childId),
+      { cardId: sourceCardId, contentJson: contentForChild(childId) },
+    ));
+    rememberChild(sourceCardId, childId);
+    focusCardForEditing(childId);
+  }
+
   function createParentLevel() {
     if (!selectedCard || !selectedCardContent || !canCreateCardsFromContent(selectedCardContent)) {
       return false;
@@ -2681,6 +2701,9 @@ export function DocumentWorkspace({
                       descendantCount={descendantCounts[selectedCard.id] ?? 0}
                     />
                     <CardEditor
+                      onCreateAnchoredChild={createAnchoredChild}
+                      onOpenAnchoredChild={(childId) => openAnchoredChild(selectedCard.id, childId)}
+                      onPassageAnchorError={(message) => setNotice({ tone: "error", message })}
                       canLeaveEditing={canLeaveEditing}
                       canCreateStructure={canCreateStructure}
                       focusPlacement={pendingEditorFocusPlacement}
@@ -2856,8 +2879,8 @@ export function DocumentWorkspace({
                       onRedo={redoEditing}
                       onRequestNavigation={leaveEditingMode}
                       onUndo={undoEditing}
-                      onSplitAtSelection={(selectionStart, selectionEnd) => {
-                        const splitContent = splitCardContentAtTextOffset(
+                      onSplitAtSelection={(selectionStart, selectionEnd, richSplit) => {
+                        const splitContent = richSplit ?? splitCardContentAtTextOffset(
                           selectedCardContent,
                           selectionStart,
                           selectionEnd,
@@ -2895,6 +2918,8 @@ export function DocumentWorkspace({
                   </div>
                 ) : (
                   <TreeCardButton
+                    activeAnchoredChildId={activeCardId ?? undefined}
+                    onOpenAnchoredChild={(childId) => openAnchoredChild(card.cardId, childId)}
                     borderColor="transparent"
                     cardWidth={isOverviewMode ? OVERVIEW_CARD_WIDTH : undefined}
                     cardLabel={cardNumbers[card.cardId] ?? card.cardId.toUpperCase()}

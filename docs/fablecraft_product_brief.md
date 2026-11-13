@@ -113,6 +113,20 @@ Cards do NOT have titles.
 - there is no layer feature in the desktop app, MCP contract, or persisted current schema
 - older layer-backed files are migrated into single-plane card content when opened
 
+### 2.5 Passage-anchored Child Cards
+
+- In editing mode, select non-whitespace text and press Cmd/Ctrl+Alt+M (Option on macOS) or Tab+Right to create a child associated with that passage. Cmd+M retains the native Minimize action.
+- The native Card menu exposes the same action as `Create Child from Passage`, with Cmd/Ctrl+Alt+M as its accelerator.
+- The new card is an ordinary child appended after all existing direct children. It immediately receives editing focus and follows normal card-column positioning; it is not aligned to the passage's line.
+- The passage keeps a persistent muted grey highlight, including in parent/preview cards. Its highlight becomes bright yellow when its associated child is selected or the editing selection/caret is inside that passage. Active yellow highlights use dark text in both themes.
+- Clicking a highlighted passage opens its specific child in editing mode, using normal centering with the source parent visible to its left. The association uses the child id, so same-parent reordering never changes the target. It also updates the remembered child for horizontal return navigation.
+- Each passage has one associated direct child. A card may contain multiple separate anchored passages. Overlapping associations are rejected with a notice; invoking the command within an existing passage opens its child rather than making a duplicate. With no selection, Tab+Right keeps its existing behavior; Cmd/Ctrl+Alt+M opens an anchor at the caret or does nothing.
+- Passage creation supports prose, including headings and lists. Selections containing inline code or code blocks are rejected with a notice because those formats exclude highlight marks; no child is created and formatting is preserved.
+- Text edits within a passage retain its association. Deleting all anchored text leaves the child as an ordinary unanchored card. Deleting the child (including abandoning an empty child), or moving it to a different parent, removes the highlight without deleting source text.
+- Creation of the child and the source highlight is one editing undo/redo operation. Existing snapshot history, autosave, reopen, and descendant badges include anchored children normally.
+- Copying/pasting prose strips associations. Structural subtree paste remaps associations to the new descendant ids. Splitting a source retains anchors in text left with the original parent; text moved to a sibling loses associations to children it no longer parents. Merging cards retains associations when their children move with the merged content. Markdown/HTML export includes the prose without interactive anchors.
+- These local parent-passage associations are a narrow exception to the MVP's prohibition on general card linking. They do not add arbitrary links, authors, replies, resolution states, or collaboration.
+
 ---
 
 ## 3. Card Lifecycle
@@ -140,7 +154,7 @@ navigation | editing | search | command
 
 ### Editing mode
 
-- text editing only
+- text editing, with explicit Tab+Arrow card creation
 
 ### Search mode
 
@@ -175,9 +189,9 @@ Up/down follows the packed spatial column, even across different parent groups. 
 
 ### Creation
 
-- In navigation mode, Tab+Up / Down → siblings
-- In navigation mode, Tab+Right → child
-- In navigation mode, Tab+Left → wrap the current level in a new parent
+- In navigation and editing modes, Tab+Up / Down → new sibling above/below
+- In navigation and editing modes, Tab+Right → new last child; in editing mode with selected text, create a passage-anchored child
+- In navigation and editing modes, Tab+Left → wrap the current level in a new parent
 - In directory navigation, Ctrl/Cmd+Right, Ctrl/Cmd+Up, or Ctrl/Cmd+Down creates a new `.fable` file inside the selected folder or beside a selected child entry, starts inline naming, and waits for Right to open it.
 - Newly generated siblings, children, parents, and the first card in a new document all default to normal paragraph text.
 
@@ -207,8 +221,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - ArrowDown at the end of a card opens the card below in edit mode at the start of that card
 - ArrowUp at the start of a card opens the card above in edit mode at the end of that card
 - ArrowRight at the end of a card opens the first child in edit mode at the start of that card
-- In editing mode, Tab+Arrow keys move between nearby cards, place the caret at the end of the destination card, and stay in edit mode
-- In editing mode, Tab+Arrow keys create a card in the pointed direction when no nearby destination card exists
+- In editing mode, Tab+Arrow keys always create in the pointed direction, even when a sibling, parent, or child already exists, and focus the new card in editing mode. Tab+Right with selected text uses passage anchoring (§2.5). Empty cards cannot create more cards; the shortcut does nothing instead of navigating.
 - Enter in an empty Markdown heading converts that heading to regular body text instead of creating another card
 - Enter in a written heading keeps the heading intact and starts a regular body-text line below it
 - Double Enter → new card below
@@ -623,7 +636,7 @@ Rules:
 - no mandatory account for local writing
 - no collaboration
 - no plugins
-- no card linking (MVP)
+- no general card linking (MVP); passage-anchored direct children are supported as defined in §2.5
 - no multi-select
 - no sync in the current MVP
 - no hosted AI connector accounts in the current MVP

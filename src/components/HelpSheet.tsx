@@ -14,6 +14,7 @@ const shortcutRows = [
   ["Escape", "Return to navigation"],
   ["Arrow keys", "Move through the spatial tree"],
   ["Tab + Arrow keys", "Create cards while navigating or editing"],
+  ["Cmd/Ctrl + Alt + M / Tab + Right", "Create a child anchored to selected text while editing"],
   ["Shift + Up / Down", "Move within the current column, even across parent groups"],
   ["Shift + Left", "Outdent the current card"],
   ["Shift + Right", "Indent under the sibling above as its last child"],

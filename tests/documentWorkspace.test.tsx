@@ -20,6 +20,7 @@ import { useDocumentStore } from "../src/state/documentStore";
 import { useInteractionStore } from "../src/state/interactionStore";
 import { useSettingsStore } from "../src/state/settingsStore";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
+import { moveCardWithinParent } from "../src/domain/document/tree";
 
 const loadCurrentDocumentSnapshot = vi.fn();
 const listCurrentDocumentDirectory = vi.fn();
@@ -53,6 +54,9 @@ vi.mock("../src/components/CardEditor", () => ({
     focusPlacement,
     isEditing,
     onCreateSiblingBelow,
+    onCreateSiblingAbove,
+    onCreateChild,
+    onCreateAnchoredChild,
     onCreateBelow,
     onDeleteEmpty,
     onNavigateAbove,
@@ -63,6 +67,9 @@ vi.mock("../src/components/CardEditor", () => ({
     focusPlacement?: string | null;
     isEditing: boolean;
     onCreateSiblingBelow?: () => void;
+    onCreateSiblingAbove?: () => void;
+    onCreateChild?: () => void;
+    onCreateAnchoredChild?: (contentForChild: (childId: string) => string) => void;
     onCreateBelow?: (splitContent: { before: string; after: string }) => void;
     onDeleteEmpty?: () => void;
     onNavigateAbove?: (placement?: "start" | "end") => boolean;
@@ -78,6 +85,13 @@ vi.mock("../src/components/CardEditor", () => ({
         data-pending-text-input={pendingTextInput ?? ""}
         data-testid="card-editor"
       />
+      <button data-testid="card-editor-create-sibling-above" onClick={() => onCreateSiblingAbove?.()} type="button" />
+      <button data-testid="card-editor-create-child" onClick={() => onCreateChild?.()} type="button" />
+      <button data-testid="create-anchored-child" onClick={() => onCreateAnchoredChild?.((childCardId) => JSON.stringify({
+        type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Source passage", marks: [
+          { type: "passageAnchor", attrs: { childCardId } },
+        ] }] }],
+      }))} type="button" />
       <button data-testid="card-editor-create-sibling-below" onClick={() => onCreateSiblingBelow?.()} type="button" />
       <button data-testid="card-editor-divide" onClick={() => onCreateBelow?.({
         before: contentJsonForPlainText("Above"),
@@ -97,6 +111,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     isActive,
     onClick,
     descendantCount,
+    onOpenAnchoredChild,
     placeholder,
     scale,
     titleOnly,
@@ -108,6 +123,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     isActive?: boolean;
     onClick?: () => void;
     descendantCount?: number;
+    onOpenAnchoredChild?: (childId: string) => void;
     placeholder?: string;
     scale?: number;
     titleOnly?: boolean;
@@ -126,7 +142,14 @@ vi.mock("../src/components/TreeCardButton", () => ({
       data-y={String(y ?? "")}
       data-testid="tree-card"
       onClick={onClick}
-    />
+    >
+      <button data-testid="open-anchored-child" onClick={(event) => {
+        event.stopPropagation();
+        const childId = contentJson ? JSON.parse(contentJson).content?.[0]?.content?.[0]?.marks
+          ?.find((mark: { type: string }) => mark.type === "passageAnchor")?.attrs?.childCardId : null;
+        if (childId) onOpenAnchoredChild?.(childId);
+      }} type="button" />
+    </div>
   ),
 }));
 
@@ -501,6 +524,46 @@ describe("DocumentWorkspace", () => {
     expect(useInteractionStore.getState().rememberedChildIds).toEqual({});
     await press("ArrowRight");
     expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
+  it("appends a passage child atomically and opens its stable id after reordering", async () => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-root", contentJson: contentJsonForPlainText("Source passage"),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "editing", screen: "workspace" });
+    useInteractionStore.setState({ activeCardId: "card-root" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    await act(async () => { (container.querySelector('[data-testid="create-anchored-child"]') as HTMLElement).click(); });
+    const childId = useInteractionStore.getState().activeCardId!;
+    const created = useDocumentStore.getState().snapshot!;
+    expect(created.cards.find((card) => card.id === childId)).toMatchObject({ parentId: "card-root", orderIndex: 2 });
+    expect(contentText(created.contents.find((content) => content.cardId === "card-root")!.contentJson)).toBe("Source passage");
+    expect(created.contents.find((content) => content.cardId === "card-root")!.contentJson).toContain(childId);
+    expect(useDocumentStore.getState().editingPast).toHaveLength(1);
+    expect(useInteractionStore.getState().rememberedChildIds["card-root"]).toBe(childId);
+    await act(async () => { useDocumentStore.getState().undoEditing(); });
+    expect(useDocumentStore.getState().snapshot?.cards).toEqual(snapshot.cards);
+    expect(useDocumentStore.getState().snapshot?.contents).toEqual(snapshot.contents);
+    await act(async () => { useDocumentStore.getState().redoEditing(); });
+    await act(async () => {
+      useDocumentStore.getState().applyNavigationChange((current) => moveCardWithinParent(current, childId, -1));
+      useInteractionStore.getState().setActiveCardId("card-a");
+    });
+    await act(async () => {
+      (container.querySelector('[data-card-label="A01"] [data-testid="open-anchored-child"]') as HTMLElement).click();
+    });
+    expect(useInteractionStore.getState().activeCardId).toBe(childId);
+    expect(useAppStore.getState().mode).toBe("editing");
+    await act(async () => { (container.querySelector('[data-testid="card-editor-delete-empty"]') as HTMLElement).click(); });
+    expect(useDocumentStore.getState().snapshot?.cards.some((card) => card.id === childId)).toBe(false);
+    expect(useDocumentStore.getState().snapshot?.contents.find((content) => content.cardId === "card-root")?.contentJson).not.toContain("passageAnchor");
     await act(async () => { root.unmount(); });
     container.remove();
   });
@@ -3340,7 +3403,7 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("keeps edit mode and places focus at the end after Tab+ArrowRight navigates to a child", async () => {
+  it("keeps edit mode and places focus at the end when the editor requests child navigation", async () => {
     const snapshot = {
       ...makeDocumentSnapshot(),
       contents: [

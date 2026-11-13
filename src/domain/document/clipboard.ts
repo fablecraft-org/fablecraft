@@ -1,6 +1,7 @@
 import { EMPTY_EDITOR_DOCUMENT_JSON } from "./editorDocument";
 import { cardContent, isContentEffectivelyEmpty, replaceCardContent } from "./content";
 import { normalizeDocumentSnapshot } from "./serialization";
+import { mapPassageAnchors } from "./passageAnchors";
 import { createSiblingAfter, deleteCardSubtree } from "./tree";
 import type { CardRecord, DocumentSnapshot } from "./types";
 
@@ -238,7 +239,7 @@ function pasteCardClipboardPayloadIntoRoot(
   if (payload.kind === "content") {
     return replaceCardContent(snapshot, {
       cardId: targetCardId,
-      contentJson: payload.rootContentJson,
+      contentJson: mapPassageAnchors(payload.rootContentJson, () => null),
     });
   }
 
@@ -274,11 +275,14 @@ function pasteCardClipboardPayloadIntoRoot(
       {
         ...snapshot,
         cards: snapshot.cards.concat(nextCards),
-        contents: snapshot.contents.concat(nextContents),
+        contents: snapshot.contents.concat(nextContents.map((content) => ({
+          ...content,
+          contentJson: mapPassageAnchors(content.contentJson, (id) => idMap.get(id) ?? null),
+        }))),
       },
       {
         cardId: targetCardId,
-        contentJson: payload.rootContentJson,
+        contentJson: mapPassageAnchors(payload.rootContentJson, (id) => idMap.get(id) ?? null),
       },
     ),
   );

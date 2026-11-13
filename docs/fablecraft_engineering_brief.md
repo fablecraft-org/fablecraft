@@ -136,6 +136,17 @@ This brief translates it into **buildable engineering instructions**.
 - card_id
 - content_json
 
+Passage anchors:
+- `passageAnchor` rich-text marks carry a `childCardId` in the source card's `content_json`. No new table or schema migration is required. The target must be an existing direct child, independent of `orderIndex`; ordinary child cards and descendant counts need no new card type.
+- `CardEditor` adds a custom TipTap mark and transient ProseMirror decorations for active passages. Cmd/Ctrl+Alt+M and selection-aware Tab+Right serialize a marked editor transaction without dispatching it; `DocumentWorkspace` appends the child and replaces source content together through `updateSnapshot`, giving one editing-history entry. Existing anchors open their child; partially overlapping or multiple anchors are rejected. Option-key shortcuts also recognize `KeyboardEvent.code` so macOS's alternate glyph does not hide KeyM.
+- `CardContentPreview` renders persistent, keyboard-activatable anchors with click propagation stopped before card selection. Preview anchors turn yellow when their child is active. Opening/creating an anchor records the selected child in horizontal navigation memory and reuses normal editor focus and spatial centering.
+- `passageAnchors.ts` normalizes references during full/editable snapshot normalization, removing invalid targets while preserving unrelated rich formatting. This covers deletion, reparenting, empty-child abandonment, document conversion, history, and hydration. Structural clipboard paste remaps ids after allocating the entire subtree; content-only and editor HTML/text paste remove anchors. Splitting anchored content uses rich editor fragments so retained passages keep marks; associations in a new sibling are dropped if the referenced children remain with the original parent.
+- Rust `storage/passage_anchors.rs` applies the same direct-child validation on load and before saving content/revisions, including MCP writes. Reordering preserves marks, deletion/reparenting strips stale references, and plain-text MCP replacement leaves former targets as ordinary children. Existing `.fable` files remain readable without migration; Markdown/HTML export omits the interactive marks.
+- Highlight colors are centralized theme tokens; normal grey highlights use inherited text color, while active yellow highlights use a dark ink token in both themes. Active state is transient and never persisted into rich-text JSON.
+- Native Card > Create Child from Passage registers CmdOrCtrl+Alt+M and emits `create-anchored-child` through the existing native/frontend action bridge. The active editor invokes the same selection-aware command as keyboard input; outside editing mode it has no effect.
+- Anchor creation checks each selected text node's parent mark allowance and existing mark exclusions. Code-formatted selections are rejected with a notice instead of creating an unanchored child or altering code formatting.
+- Acceptance checks: create after existing children; preserve source formatting and text; open the exact id after reorder; grey/yellow states in editor and preview; no-selection behavior and macOS Option glyph handling; prevent overlapping anchors; atomic undo/redo; delete/reparent cleanup; subtree clipboard remapping; reopen/autosave and MCP-safe persistence.
+
 ### revisions
 - id
 - snapshot
@@ -269,7 +280,7 @@ animation: ~140ms ease-in-out
 - confirming deletion of the currently open `.fable` file closes the active document and returns to startup
 - shuffle, merge, indent, outdent, and text-entry commands do not mutate folder or `.fable` document context cards; directory file creation, FABLE document renaming, and confirmed FABLE deletion are the supported file mutations in folder context.
 - typing any printable character enters edit mode and forwards that character into the editor
-- Tab+ArrowUp / Down / Right / Left create siblings, children, and wrapped parents in navigation mode
+- Tab+ArrowUp / Down / Right / Left create siblings, last children, and wrapped parents in both navigation and editing modes
 - Shift+Up / Down moves within the packed column, can reorder root cards, and may reparent a card when crossing into a neighboring parent group
 - Shift+Right indents the active card under the sibling above as its last child
 - Option+Up / Down merges the active card with the sibling above or below while preserving the active card id
@@ -292,8 +303,7 @@ animation: ~140ms ease-in-out
 - ArrowDown at the end of a card moves into the card below in edit mode at the start of that card
 - ArrowUp at the start of a card moves into the card above in edit mode at the end of that card
 - ArrowRight at the end of a card moves into the first child in edit mode at the start of that card
-- Tab+Arrow navigates nearby cards, places the caret at the end of the destination card, and stays in edit mode
-- Tab+Arrow creates a card in the pointed direction when no nearby destination card exists in edit mode
+- Editing-mode Tab+Arrow dispatches creation callbacks directly, without first invoking navigation callbacks. Up/Down create siblings, Left wraps the current level in a new parent, and Right appends a child (or creates/opens a passage anchor when text is selected). Existing neighbors never intercept creation. `canCreateStructure` still prevents creation from empty cards without navigating; new cards retain editing focus. Tab-held state survives editor remounts. Bare-arrow boundary navigation remains unchanged.
 - Enter in an empty Markdown heading converts it to a paragraph and does not create a sibling
 - Enter in a non-empty heading inserts a regular paragraph below the heading without creating a sibling or converting the heading itself
 - Option+Up / Down in edit mode merges with the sibling above or below without leaving edit mode
