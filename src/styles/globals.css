@@ -41,6 +41,47 @@ body[data-fc-runtime="web"] {
   -webkit-app-region: drag;
 }
 
+.fc-card-identity {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: var(--fc-card-identity-gap);
+  right: var(--fc-card-identity-inset);
+  top: var(--fc-card-identity-top);
+  margin: 0;
+  color: var(--fc-color-card-label);
+  font-family: var(--fc-font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: var(--fc-descendant-badge-height);
+  letter-spacing: 0.14em;
+}
+
+.fc-card-identity-compact {
+  right: var(--fc-card-identity-compact-inset);
+  top: var(--fc-card-identity-compact-top);
+}
+
+.fc-descendant-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--fc-descendant-badge-width);
+  height: var(--fc-descendant-badge-height);
+  padding: 0 3px;
+  border: 1px solid currentColor;
+  border-radius: var(--fc-descendant-badge-radius);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.fc-overview-card-title {
+  padding-right: var(--fc-card-identity-title-reserve);
+}
+
 .fc-document-title {
   position: absolute;
   top: 0;

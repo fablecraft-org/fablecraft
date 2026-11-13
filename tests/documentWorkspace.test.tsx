@@ -96,7 +96,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     contentJson,
     isActive,
     onClick,
-    parentCardLabel,
+    descendantCount,
     placeholder,
     scale,
     titleOnly,
@@ -107,7 +107,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     contentJson?: string;
     isActive?: boolean;
     onClick?: () => void;
-    parentCardLabel?: string;
+    descendantCount?: number;
     placeholder?: string;
     scale?: number;
     titleOnly?: boolean;
@@ -118,7 +118,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
       data-card-label={cardLabel ?? ""}
       data-content-json={contentJson ?? ""}
       data-is-active={String(Boolean(isActive))}
-      data-parent-card-label={parentCardLabel ?? ""}
+      data-descendant-count={descendantCount ?? 0}
       data-placeholder={placeholder ?? ""}
       data-scale={String(scale ?? "")}
       data-title-only={String(Boolean(titleOnly))}
@@ -505,6 +505,44 @@ describe("DocumentWorkspace", () => {
     container.remove();
   });
 
+  it("shows only ancestors, same-parent siblings, and direct children, updating on selection", async () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      { ...snapshot.cards[0]!, id: "other-root", orderIndex: 1 },
+      { ...snapshot.cards[1]!, id: "a-child", parentId: "card-a" },
+      { ...snapshot.cards[1]!, id: "b-child", parentId: "card-b" },
+      { ...snapshot.cards[1]!, id: "grandchild", parentId: "a-child" },
+    );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "navigation", screen: "workspace" });
+    useInteractionStore.setState({ activeCardId: "card-a" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    const labels = () => Array.from(container.querySelectorAll<HTMLElement>('[data-testid="tree-card"]'))
+      .map((card) => card.dataset.cardLabel).sort();
+    expect(labels()).toEqual(["A01", "B02", "C01"]);
+    // Includes the grandchild that is hidden in this writing view.
+    expect(container.querySelector('[data-testid="active-card-shell"] .fc-descendant-count')?.textContent).toBe("2");
+    expect(container.querySelector('[data-testid="parent-group-divider"]')).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
+    });
+    expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+    expect(labels()).toEqual(["A01", "B01", "C02"]);
+    expect(container.querySelector('[data-testid="active-card-shell"] .fc-descendant-count')?.textContent).toBe("1");
+    await act(async () => { useInteractionStore.getState().setActiveCardId("a-child"); });
+    expect(labels()).toEqual(["A01", "B01", "D01"]);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "-", metaKey: true }));
+    });
+    expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(7);
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
   it("keeps the active card shell footprint stable between navigation and editing", async () => {
     const snapshot = makeDocumentSnapshot();
     const container = document.createElement("div");
@@ -593,8 +631,8 @@ describe("DocumentWorkspace", () => {
       (node as HTMLDivElement).dataset.cardLabel,
     )).toEqual(["B01", "B02"]);
     expect(Array.from(container.querySelectorAll('[data-testid="tree-card"]')).map((node) =>
-      (node as HTMLDivElement).dataset.parentCardLabel,
-    )).toEqual(["A01", "A01"]);
+      (node as HTMLDivElement).dataset.descendantCount,
+    )).toEqual(["0", "0"]);
 
     await act(async () => {
       root.unmount();
@@ -1853,7 +1891,7 @@ describe("DocumentWorkspace", () => {
       | undefined;
 
     expect(selectedOverviewCard?.dataset.cardLabel).toBe("B01");
-    expect(selectedOverviewCard?.dataset.parentCardLabel).toBe("A01");
+    expect(selectedOverviewCard?.dataset.descendantCount).toBe("0");
     expect(selectedOverviewCard?.dataset.scale).toBe(initialOverviewScale);
     expect(selectedOverviewCard?.dataset.x).toBe("0");
     expect(selectedOverviewCard?.dataset.y).toBe("0");
