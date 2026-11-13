@@ -237,7 +237,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - Parents: left-middle column
 - Children: right column
 - Siblings: above and below the active card
-- all cards remain rendered in the stage unless they are off-screen
+- The normal writing view shows only the selected card, its ancestor chain, its siblings (cards with the same parent), and its direct children. Children of other cards and deeper descendants stay hidden until selected through navigation. Overview continues to show the whole tree.
 - Cmd/Ctrl+- enters a structural overview state that uses compact, fixed-size title-only card shells at a fixed zoom level
 - overview title shells are wide enough for short titles and may wrap title text across two lines
 - overview breaks away from normal writing-view packing rules so it can show how the tree forks by depth
@@ -260,9 +260,9 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - dark theme card number labels use a light token so labels such as `A01` remain visible
 - immediate parent aligns vertically with the active card
 - the remembered immediate child (otherwise the first child) is vertically centered on the active card; siblings stack above and below it in order, even when other child groups share that column. Remembered deeper return paths retain their alignment during horizontal navigation
-- first children of other visible parent groups in the same child column stay as close as possible to the parent's visible top-aligned child slot whenever they can do so without overlapping the active child group or reserved empty child slot, with later children stacked directly below that first child
+- The underlying spatial layout retains hidden branches for column navigation: first children of other parent groups prefer their parent's top-aligned slot, with later children stacked below, while avoiding the active child group or reserved empty child slot. Visibility filtering does not change tree order or keyboard destinations.
 - anchoring the active child group must not reorder neighboring sibling subtrees in that same child column
-- when the active card has no children, the child column still reserves a full empty slot centered on the active card so neighboring sibling subtrees cannot visually read as its children
+- when the active card has no children, the child column shows no writing cards and retains a full empty child-creation slot centered on the active card
 - that empty child slot matches the selected card footprint but stays visually invisible against the workspace background while remaining clickable for first-child creation
 - no helper copy, mode labels, or structural labels outside cards
 
@@ -643,7 +643,7 @@ Fablecraft is a:
 Its core innovation is allowing users to move across **levels of abstraction** while maintaining a clean, minimal interface.
 Card identity:
 - Each card shows a human-friendly structural number in the top-right corner.
-- Non-root cards show their parent card's structural number in the top-left corner using the same label style.
+- Cards leave the top-left corner free of identifiers. Immediately to the left of the top-right structural number, a small rounded card-shaped outline shows the total descendant count (children, grandchildren, and deeper descendants, excluding the card itself). Leaf cards hide the badge entirely; hidden descendants are included. This identity treatment applies to writing cards and overview cards.
 - The current first-pass numbering model is grid-like by depth: root cards begin at `A01`, their children at `B01`, `B02`, and so on.
 - The numbering is present in workspace cards and search results to make navigation and discussion easier without introducing titles.
 Settings clarity:

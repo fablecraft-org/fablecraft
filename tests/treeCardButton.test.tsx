@@ -108,7 +108,7 @@ describe("TreeCardButton", () => {
           contentJson='{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hello"}]}]}'
           onClick={() => {}}
           onMeasureHeight={(height) => measuredHeights.push(height)}
-          parentCardLabel="A01"
+          descendantCount={12}
           x={0}
           y={0}
         />,
@@ -120,11 +120,33 @@ describe("TreeCardButton", () => {
     expect(measuredHeights[0]).toBe(180);
     expect(paragraph?.className).toContain("m-0");
     expect(container.textContent).toContain("B01");
-    expect(container.textContent).toContain("A01");
+    expect(container.textContent).not.toContain("A01");
+    expect(container.querySelector(".fc-descendant-count")?.textContent).toBe("12");
 
     act(() => {
       root.unmount();
     });
+  });
+
+  it("hides the descendant badge for leaves and updates it when descendants change", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const render = (descendantCount: number) => act(() => {
+      root.render(<TreeCardButton
+        borderColor="transparent" cardLabel="B01" descendantCount={descendantCount}
+        contentJson='{"type":"doc","content":[{"type":"paragraph"}]}'
+        onClick={() => {}} x={0} y={0}
+      />);
+    });
+    render(0);
+    expect(container.querySelector(".fc-descendant-count")).toBeNull();
+    expect(container.querySelector(".fc-card-identity")?.textContent).toBe("B01");
+    render(1234);
+    expect(container.querySelector(".fc-descendant-count")?.textContent).toBe("1234");
+    expect(container.querySelector(".fc-descendant-count")?.getAttribute("aria-label")).toBe("1234 descendant cards");
+    render(0);
+    expect(container.querySelector(".fc-descendant-count")).toBeNull();
+    act(() => { root.unmount(); });
   });
 
   it("measures layout height instead of transformed bounding height", () => {
@@ -260,7 +282,7 @@ describe("TreeCardButton", () => {
           contentJson='{"type":"doc","content":[{"type":"heading","content":[{"type":"text","text":"Scene title"}]},{"type":"paragraph","content":[{"type":"text","text":"Hidden body"}]}]}'
           minHeight={72}
           onClick={() => {}}
-          parentCardLabel="A01"
+          descendantCount={12}
           titleOnly
           x={0}
           y={0}
@@ -275,7 +297,8 @@ describe("TreeCardButton", () => {
       (paragraph) => paragraph.textContent === "Scene title",
     ) as HTMLParagraphElement | undefined;
     expect(titleParagraph?.className).toContain("overflow-hidden");
-    expect(titleParagraph?.className).toContain("pl-10");
+    expect(titleParagraph?.className).toContain("fc-overview-card-title");
+    expect(container.querySelector(".fc-descendant-count")?.textContent).toBe("12");
     expect(titleParagraph?.className).not.toContain("truncate");
 
     act(() => {
@@ -332,8 +355,8 @@ describe("TreeCardButton", () => {
     expect(activeCard?.style.opacity).toBe("1");
     expect(activeCard?.style.boxShadow).toBe("var(--fc-shadow-elevated)");
     expect(activeCard?.style.paddingTop).toBe("40px");
-    expect(activeCard?.querySelector("p")?.className).toContain(
-      "text-[var(--fc-color-card-label)]",
+    expect(activeCard?.querySelector(".fc-card-identity")?.className).toContain(
+      "fc-card-identity",
     );
     expect(neighborhoodCard?.style.borderWidth).toBe("0px");
     expect(neighborhoodCard?.style.opacity).toBe("1");

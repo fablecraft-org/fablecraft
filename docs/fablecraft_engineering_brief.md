@@ -324,7 +324,7 @@ animation: ~140ms ease-in-out
 - navigation focus uses the same elevated shadow as the selected editing card
 - dark theme card shadows are disabled; card visibility comes from lighter card-surface tokens, with an even lighter editing surface
 - card number labels use a theme token with a lighter dark-mode value
-- neighborhood and non-neighborhood cards keep full text contrast without shadow treatment
+- Normal writing view filters the rendered stage cards to `isNeighborhood` (active card, immediate parent, same-parent siblings, direct children) plus `ancestorsOfCard`. Other branches and deeper descendants remain in the full layout and keyboard navigation model but do not render. Overview renders every card; the hidden-neighbor preference still renders only the active card. Visible preview cards keep full text contrast without shadow treatment.
 - immediate parent aligns with the active card
 - normal `stageLayout` receives the remembered child map and aligns the remembered immediate child (otherwise the first) with the active card centerline, stacking siblings above/below in tree order without overlap; remembered deeper return paths stay aligned as well
 - non-active first children in the active child column prefer their own parent's visible top-aligned child slot and are displaced only far enough to avoid the active child group or reserved empty child slot, with later siblings stacked directly below them
@@ -475,7 +475,7 @@ animation: ~140ms ease-in-out
 Card numbering:
 - Card numbering is derived at runtime from document structure, not stored in SQLite.
 - The current implementation assigns labels by depth and visual order using a depth letter plus two-digit sequence, for example `A01`, `B01`, `B02`.
-- Card shells render the current card label in the top-right corner and, for non-root cards, the parent card label in the top-left corner using the same label token.
+- `CardIdentity` renders the top-right structural label with a small rounded outline badge immediately to its left; parent identifiers are no longer rendered. `buildDescendantCountMap` computes total descendants for every card in linear time over the full snapshot tree, excluding the card itself and including hidden descendants. Counts are derived at runtime and update with tree edits, undo/redo, and snapshot hydration; leaves hide the badge. Active, preview, and overview writing cards share this identity component and the existing theme-aware label color. Badge geometry, spacing, placement, and overview title clearance use centralized UI tokens.
 - Search results must display the derived card label alongside matched content.
 Settings presentation:
 - Settings rows should expose row-level keyboard focus visually with a leading chevron-style cue.

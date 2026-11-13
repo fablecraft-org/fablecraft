@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as Rea
 import { CardEditor } from "./CardEditor";
 import { OverlayShell } from "./OverlayShell";
 import { TreeCardButton } from "./TreeCardButton";
+import { CardIdentity } from "./CardIdentity";
+import { buildDescendantCountMap } from "../domain/document/descendantCounts";
 import { buildCardNumberMap } from "../domain/document/cardNumbers";
 import {
   CARD_CLIPBOARD_MIME_TYPE,
@@ -610,9 +612,16 @@ export function DocumentWorkspace({
   const stageCards = isOverviewMode
     ? overviewLayoutResult.cards
     : normalStageLayoutResult.cards;
+  const visibleAncestorIds = new Set(
+    activeSnapshot && activeCardId
+      ? ancestorsOfCard(activeSnapshot.cards, activeCardId).map((card) => card.id)
+      : [],
+  );
   const positionedCards =
     activeSnapshot
-      ? stageCards.map((position) => ({
+      ? stageCards.filter((position) =>
+          isOverviewMode || position.isNeighborhood || visibleAncestorIds.has(position.cardId),
+        ).map((position) => ({
           ...position,
           contentJson: cardContent(activeSnapshot, position.cardId),
           parentId:
@@ -738,6 +747,7 @@ export function DocumentWorkspace({
   const overviewScale = isOverviewMode ? OVERVIEW_SCALE : 1;
   const isEditingSelectedCard = mode === "editing";
   const cardNumbers = activeSnapshot ? buildCardNumberMap(activeSnapshot) : {};
+  const descendantCounts = activeSnapshot ? buildDescendantCountMap(activeSnapshot.cards) : {};
   const highlightedOverviewConnectorChildIds = new Set(
     activeSnapshot && activeCardId && isOverviewMode
       ? [
@@ -2666,15 +2676,10 @@ export function DocumentWorkspace({
                       zIndex: 2,
                     }}
                   >
-                    {selectedCard.parentId ? (
-                      <p className="pointer-events-none absolute left-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]">
-                        {cardNumbers[selectedCard.parentId] ??
-                          selectedCard.parentId.toUpperCase()}
-                      </p>
-                    ) : null}
-                    <p className="pointer-events-none absolute right-[28px] top-[18px] font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]">
-                      {cardNumbers[selectedCard.id] ?? selectedCard.id.toUpperCase()}
-                    </p>
+                    <CardIdentity
+                      cardLabel={cardNumbers[selectedCard.id] ?? selectedCard.id.toUpperCase()}
+                      descendantCount={descendantCounts[selectedCard.id] ?? 0}
+                    />
                     <CardEditor
                       canLeaveEditing={canLeaveEditing}
                       canCreateStructure={canCreateStructure}
@@ -2894,11 +2899,7 @@ export function DocumentWorkspace({
                     cardWidth={isOverviewMode ? OVERVIEW_CARD_WIDTH : undefined}
                     cardLabel={cardNumbers[card.cardId] ?? card.cardId.toUpperCase()}
                     contentJson={card.contentJson}
-                    parentCardLabel={
-                      card.parentId
-                        ? cardNumbers[card.parentId] ?? card.parentId.toUpperCase()
-                        : undefined
-                    }
+                    descendantCount={descendantCounts[card.cardId] ?? 0}
                     placeholder={
                       !isFirstRootCardId(card.cardId) &&
                       isContentEffectivelyEmpty(card.contentJson)

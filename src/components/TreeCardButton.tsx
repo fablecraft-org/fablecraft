@@ -1,12 +1,13 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { CardContentPreview } from "./CardContentPreview";
 import { contentTitlePreview } from "../domain/document/content";
+import { CardIdentity } from "./CardIdentity";
 
 interface TreeCardButtonProps {
   borderColor: string;
   cardLabel?: string;
   contentJson: string;
-  parentCardLabel?: string;
+  descendantCount?: number;
   placeholder?: string;
   isActive?: boolean;
   onMeasureHeight?: (height: number) => void;
@@ -23,7 +24,7 @@ export function TreeCardButton({
   borderColor,
   cardLabel,
   contentJson,
-  parentCardLabel,
+  descendantCount = 0,
   placeholder = "",
   isActive = false,
   onMeasureHeight,
@@ -96,31 +97,12 @@ export function TreeCardButton({
         zIndex: isActive ? 2 : 1,
       } as CSSProperties}
     >
-      {parentCardLabel ? (
-        <p
-          className="pointer-events-none absolute font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]"
-          style={{
-            left: titleOnly ? "18px" : "28px",
-            top: titleOnly ? "12px" : "18px",
-          }}
-        >
-          {parentCardLabel}
-        </p>
-      ) : null}
       {cardLabel ? (
-        <p
-          className="pointer-events-none absolute font-[var(--fc-font-ui)] text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--fc-color-card-label)]"
-          style={{
-            right: titleOnly ? "18px" : "28px",
-            top: titleOnly ? "12px" : "18px",
-          }}
-        >
-          {cardLabel}
-        </p>
+        <CardIdentity cardLabel={cardLabel} descendantCount={descendantCount} compact={titleOnly} />
       ) : null}
       {titleOnly ? (
         <p
-          className={`m-0 max-w-full overflow-hidden pr-10 font-[var(--fc-font-ui)] text-[15px] font-semibold leading-[1.25] text-[var(--fc-color-text)] ${parentCardLabel ? "pl-10" : ""}`}
+          className="fc-overview-card-title m-0 max-w-full overflow-hidden font-[var(--fc-font-ui)] text-[15px] font-semibold leading-[1.25] text-[var(--fc-color-text)]"
           style={{
             display: "-webkit-box",
             WebkitBoxOrient: "vertical",
