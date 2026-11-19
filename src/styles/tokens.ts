@@ -2,12 +2,10 @@ export type UiTheme = "light" | "dark";
 export type UiFont = "serif" | "sans";
 export type UiTextSize = "comfortable" | "large";
 export type UiLineHeight = "compact" | "relaxed";
-export type UiCardWidth = "standard" | "wide";
 export type UiNeighborCards = "visible" | "hidden";
 export type UiScrollPan = "enabled" | "disabled";
 
 export interface UiPreferences {
-  cardWidth: UiCardWidth;
   font: UiFont;
   lineHeight: UiLineHeight;
   neighborCards: UiNeighborCards;
@@ -37,6 +35,8 @@ const themeTokens = {
     noticeText: "#f4f4f1",
     onDark: "#fff7f1",
     overlayBackdrop: "rgba(245, 236, 230, 0.82)",
+    overviewCardShadow: "0 12px 28px rgba(23, 20, 18, 0.08)",
+    overviewCardShadowActive: "0 12px 28px rgba(23, 20, 18, 0.18)",
     overviewConnector: "#e1dbd6",
     overviewConnectorActive: "#b2aaa3",
     shadowCard: "0 12px 28px rgba(23, 20, 18, 0.08)",
@@ -66,6 +66,8 @@ const themeTokens = {
     noticeText: "#f4f4f1",
     onDark: "#18191b",
     overlayBackdrop: "rgba(12, 13, 15, 0.72)",
+    overviewCardShadow: "0 12px 28px rgba(0, 0, 0, 0.24)",
+    overviewCardShadowActive: "0 12px 28px rgba(0, 0, 0, 0.48)",
     overviewConnector: "#5c6066",
     overviewConnectorActive: "#464a51",
     shadowCard: "none",
@@ -95,6 +97,8 @@ const themeTokens = {
   noticeText: string;
   onDark: string;
   overlayBackdrop: string;
+  overviewCardShadow: string;
+  overviewCardShadowActive: string;
   overviewConnector: string;
   overviewConnectorActive: string;
   shadowCard: string;
@@ -134,13 +138,16 @@ const lineHeightTokens = {
   relaxed: "2rem",
 } satisfies Record<UiLineHeight, string>;
 
-const cardWidthTokens = {
-  standard: 468,
-  wide: 640,
-} satisfies Record<UiCardWidth, number>;
+export const writingLayoutTokens = {
+  minimumCardWidth: 360,
+  focusedCardWidth: 880,
+  maximumColumns: 4,
+  margin: 24,
+  spacing: 24,
+  verticalInset: 48,
+};
 
 const defaultUiPreferences: UiPreferences = {
-  cardWidth: "standard",
   font: "sans",
   lineHeight: "compact",
   neighborCards: "visible",
@@ -153,6 +160,10 @@ const uiTokens = {
   animationEasing: "cubic-bezier(0.2, 0.85, 0.3, 1)",
   animationMs: 140,
   cardHeight: 84,
+  directoryCardWidth: 468,
+  cardLink: { fontSize: "0.75em", paddingX: 5, paddingY: 1, gap: 2 },
+  referenceIconSize: 14,
+  focusedNavigation: { size: 24, inset: 16, topInset: 48, strokeWidth: 2 },
   cardIdentity: {
     badgeWidth: 26,
     badgeHeight: 18,
@@ -204,11 +215,6 @@ export function normalizeUiPreferences(
     rawThemeValue === "paper" || rawThemeValue === "studio" ? "light" : rawThemeValue;
 
   return {
-    cardWidth: normalizeEnumValue(
-      value?.cardWidth,
-      ["standard", "wide"],
-      defaultUiPreferences.cardWidth,
-    ),
     font: normalizeEnumValue(value?.font, ["serif", "sans"], defaultUiPreferences.font),
     lineHeight: normalizeEnumValue(
       value?.lineHeight,
@@ -234,10 +240,10 @@ export function normalizeUiPreferences(
   };
 }
 
-export function resolveUiMetrics(preferences: UiPreferences) {
+export function resolveUiMetrics(_preferences: UiPreferences) {
   return {
     cardHeight: uiTokens.cardHeight,
-    cardWidth: cardWidthTokens[preferences.cardWidth],
+    cardWidth: uiTokens.directoryCardWidth,
     spacing: uiTokens.spacing,
   };
 }
@@ -252,11 +258,20 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-animation-ms": `${uiTokens.animationMs}ms`,
     "--fc-card-height": `${metrics.cardHeight}px`,
     "--fc-card-width": `${metrics.cardWidth}px`,
+    "--fc-focused-navigation-size": `${uiTokens.focusedNavigation.size}px`,
+    "--fc-focused-navigation-inset": `${uiTokens.focusedNavigation.inset}px`,
+    "--fc-focused-navigation-top-inset": `${uiTokens.focusedNavigation.topInset}px`,
+    "--fc-focused-navigation-stroke-width": `${uiTokens.focusedNavigation.strokeWidth}`,
+    "--fc-reference-icon-size": `${uiTokens.referenceIconSize}px`,
     "--fc-card-identity-inset": `${uiTokens.cardIdentity.inset}px`,
     "--fc-card-identity-top": `${uiTokens.cardIdentity.top}px`,
     "--fc-card-identity-compact-inset": `${uiTokens.cardIdentity.compactInset}px`,
     "--fc-card-identity-compact-top": `${uiTokens.cardIdentity.compactTop}px`,
     "--fc-card-identity-gap": `${uiTokens.cardIdentity.gap}px`,
+    "--fc-card-link-font-size": uiTokens.cardLink.fontSize,
+    "--fc-card-link-padding-x": `${uiTokens.cardLink.paddingX}px`,
+    "--fc-card-link-padding-y": `${uiTokens.cardLink.paddingY}px`,
+    "--fc-card-link-gap": `${uiTokens.cardLink.gap}px`,
     "--fc-descendant-badge-width": `${uiTokens.cardIdentity.badgeWidth}px`,
     "--fc-descendant-badge-height": `${uiTokens.cardIdentity.badgeHeight}px`,
     "--fc-descendant-badge-radius": `${uiTokens.cardIdentity.badgeRadius}px`,
@@ -280,6 +295,8 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-color-notice-text": theme.noticeText,
     "--fc-color-on-dark": theme.onDark,
     "--fc-color-overlay-backdrop": theme.overlayBackdrop,
+    "--fc-shadow-overview-card": theme.overviewCardShadow,
+    "--fc-shadow-overview-card-active": theme.overviewCardShadowActive,
     "--fc-color-overview-connector": theme.overviewConnector,
     "--fc-color-overview-connector-active": theme.overviewConnectorActive,
     "--fc-color-surface": theme.surface,

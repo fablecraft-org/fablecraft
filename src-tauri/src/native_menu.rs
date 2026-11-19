@@ -34,6 +34,9 @@ const TOOLS_SEARCH: &str = "tools.search";
 const TOOLS_ENABLE_CODEX: &str = "tools.enable_codex";
 const TOOLS_ENABLE_CLAUDE_DESKTOP: &str = "tools.enable_claude_desktop";
 const WINDOW_RELOAD: &str = "window.reload";
+const WINDOW_WIDE_LENS: &str = "window.wide_lens";
+const WINDOW_NORMAL: &str = "window.normal";
+const WINDOW_FOCUSED: &str = "window.focused";
 const WINDOW_ZOOM_IN: &str = "window.zoom_in";
 const WINDOW_ZOOM_OUT: &str = "window.zoom_out";
 const HELP_SHORTCUTS: &str = "help.shortcuts";
@@ -123,12 +126,16 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     let reload = MenuItemBuilder::with_id(WINDOW_RELOAD, "Reload")
         .accelerator("CmdOrCtrl+R")
         .build(app)?;
-    let zoom_in = MenuItemBuilder::with_id(WINDOW_ZOOM_IN, "Zoomed In")
+    let zoom_in = MenuItemBuilder::with_id(WINDOW_ZOOM_IN, "Zoom In")
         .accelerator("CmdOrCtrl+=")
         .build(app)?;
-    let zoom_out = MenuItemBuilder::with_id(WINDOW_ZOOM_OUT, "Zoomed Out")
+    let zoom_out = MenuItemBuilder::with_id(WINDOW_ZOOM_OUT, "Zoom Out")
         .accelerator("CmdOrCtrl+-")
         .build(app)?;
+
+    let wide_lens = MenuItemBuilder::with_id(WINDOW_WIDE_LENS, "Wide Lens").build(app)?;
+    let normal = MenuItemBuilder::with_id(WINDOW_NORMAL, "Normal").build(app)?;
+    let focused = MenuItemBuilder::with_id(WINDOW_FOCUSED, "Focused").build(app)?;
 
     let shortcuts = MenuItemBuilder::with_id(HELP_SHORTCUTS, "Shortcuts").build(app)?;
     let commands = MenuItemBuilder::with_id(HELP_COMMANDS, "Commands").build(app)?;
@@ -201,6 +208,10 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .item(&zoom_in)
         .item(&zoom_out)
         .separator()
+        .item(&wide_lens)
+        .item(&normal)
+        .item(&focused)
+        .separator()
         .minimize_with_text("Minimize")
         .fullscreen_with_text("Toggle Full Screen")
         .build()?;
@@ -258,6 +269,9 @@ pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent
         TOOLS_SEARCH => emit_action(app, "search"),
         TOOLS_ENABLE_CODEX => emit_action(app, "enable-codex"),
         TOOLS_ENABLE_CLAUDE_DESKTOP => emit_action(app, "enable-claude-desktop"),
+        WINDOW_WIDE_LENS => emit_action(app, "view-wide-lens"),
+        WINDOW_NORMAL => emit_action(app, "view-normal"),
+        WINDOW_FOCUSED => emit_action(app, "view-focused"),
         WINDOW_ZOOM_IN => emit_action(app, "zoom-in"),
         WINDOW_ZOOM_OUT => emit_action(app, "zoom-out"),
         HELP_GETTING_STARTED => emit_action(app, "help-getting-started"),

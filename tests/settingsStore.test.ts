@@ -104,20 +104,16 @@ describe("settings persistence", () => {
 
   it("restores stored preferences on a fresh load", () => {
     useSettingsStore.getState().setTheme("dark");
-    useSettingsStore.getState().setCardWidth("wide");
 
     expect(loadStoredUiPreferences()).toMatchObject({
-      cardWidth: "wide",
       theme: "dark",
     });
   });
 
-  it("applies the wide card width token", () => {
-    useSettingsStore.getState().setCardWidth("wide");
-
-    expect(
-      document.documentElement.style.getPropertyValue("--fc-card-width"),
-    ).toBe("640px");
+  it("discards the retired width setting when restoring old preferences", () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme: "dark", cardWidth: "wide" }));
+    expect(loadStoredUiPreferences()).toMatchObject({ theme: "dark" });
+    expect(loadStoredUiPreferences()).not.toHaveProperty("cardWidth");
   });
 
   it("falls back to defaults when stored JSON is corrupted", () => {
@@ -148,7 +144,7 @@ describe("settings persistence", () => {
     const restored = loadStoredUiPreferences();
 
     expect(restored.theme).toBe("light");
-    expect(restored.cardWidth).toBe("standard");
+    expect(restored).not.toHaveProperty("cardWidth");
     expect(restored.neighborCards).toBe("visible");
   });
 });

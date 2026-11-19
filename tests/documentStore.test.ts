@@ -1,3 +1,4 @@
+import { deleteCardSubtree, moveCardWithinParent } from "../src/domain/document/tree";
 import { markdownToContentJson } from "../src/domain/document/importExport";
 import { replaceCardContent } from "../src/domain/document/content";
 import { useDocumentStore } from "../src/state/documentStore";
@@ -16,6 +17,26 @@ describe("document store", () => {
       saveState: "idle",
       snapshot: null,
     });
+  });
+
+  it("undos link creation and restores deleted link targets without retargeting after reorder", () => {
+    const store = useDocumentStore;
+    store.getState().hydrateSnapshot(makeDocumentSnapshot());
+    const contentJson = JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [
+      { type: "cardLink", attrs: { targetCardId: "card-a", label: "B01" } },
+    ] }] });
+    store.getState().updateSnapshot((snapshot) => replaceCardContent(snapshot, { cardId: "card-root", contentJson }));
+    store.getState().undoEditing();
+    expect(store.getState().snapshot?.contents[0]?.contentJson).not.toContain("cardLink");
+    store.getState().redoEditing();
+    store.getState().applyNavigationChange((snapshot) => moveCardWithinParent(snapshot, "card-a", 1));
+    expect(store.getState().snapshot?.contents.find((content) => content.cardId === "card-root")?.contentJson).toContain('"label":"B02"');
+    store.getState().applyNavigationChange((snapshot) => deleteCardSubtree(snapshot, "card-a"));
+    expect(store.getState().snapshot?.cards.some((card) => card.id === "card-a")).toBe(false);
+    expect(store.getState().snapshot?.contents.find((content) => content.cardId === "card-root")?.contentJson).toContain('"targetCardId":"card-a"');
+    store.getState().undoNavigation();
+    expect(store.getState().snapshot?.cards.some((card) => card.id === "card-a")).toBe(true);
+    expect(store.getState().snapshot?.contents.find((content) => content.cardId === "card-root")?.contentJson).toContain('"targetCardId":"card-a"');
   });
 
   it("records external MCP mutations as a single undo step", () => {

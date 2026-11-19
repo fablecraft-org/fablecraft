@@ -2,6 +2,8 @@ import { Fragment, type ReactNode } from "react";
 import { contentText } from "../domain/document/content";
 
 interface AnchorPresentation {
+  cardLabels?: Record<string, string>;
+  onOpenCardLink?: (cardId: string) => void;
   activeAnchoredChildId?: string;
   onOpenAnchoredChild?: (childId: string) => void;
 }
@@ -92,6 +94,22 @@ function renderChildren(nodes: PreviewNode[], keyPrefix: string, anchors: Anchor
 }
 
 function renderNode(node: PreviewNode, key: string, anchors: AnchorPresentation): ReactNode {
+  if (node.type === "cardLink") {
+    const id = String(node.attrs?.targetCardId ?? "");
+    const label = anchors.cardLabels?.[id];
+    const open = () => { if (label) anchors.onOpenCardLink?.(id); };
+    return <span key={key} className={`fc-card-link${label ? "" : " fc-card-link-missing"}`}
+      role="link" tabIndex={0} aria-disabled={!label}
+      aria-label={label ? `Open card ${label}` : "Missing card"}
+      data-fc-card-link={id}
+      onClick={(event) => { event.stopPropagation(); open(); }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault(); event.stopPropagation(); open();
+        }
+      }}
+    >{label ?? String(node.attrs?.label ?? "Missing card")}</span>;
+  }
   if (node.type === "text") {
     return (
       <Fragment key={key}>
@@ -189,6 +207,7 @@ interface CardContentPreviewProps extends AnchorPresentation {
 
 export function CardContentPreview({
   contentJson,
+  cardLabels, onOpenCardLink,
   placeholder = "",
   activeAnchoredChildId,
   onOpenAnchoredChild,
@@ -215,7 +234,7 @@ export function CardContentPreview({
 
   return (
     <div className="fc-editor fc-preview text-[length:var(--fc-content-size)] leading-[var(--fc-content-line-height)] text-[var(--fc-color-text)]">
-      {renderNode(previewDocument, "root", { activeAnchoredChildId, onOpenAnchoredChild })}
+      {renderNode(previewDocument, "root", { activeAnchoredChildId, onOpenAnchoredChild, cardLabels, onOpenCardLink })}
     </div>
   );
 }

@@ -8,10 +8,17 @@ import { trimTrailingEmptyParagraphs } from "../domain/document/content";
 import { EMPTY_EDITOR_DOCUMENT_JSON } from "../domain/document/editorDocument";
 import type { SplitCardContent } from "../domain/document/split";
 import { listenForFrontendMenuActions } from "../lib/nativeMenu";
+import { CardLinkNode, convertTypedCardLink } from "./cardLinkNode";
+import { CARD_LINK_NODE } from "../domain/document/cardLinks";
 import { PassageAnchorMark } from "./passageAnchorMark";
 import { PASSAGE_ANCHOR_MARK } from "../domain/document/passageAnchors";
 
 interface CardEditorProps {
+  onRevealSelection?: (bounds: { top: number; bottom: number }) => void;
+  selectionViewportKey?: string;
+  cardLabels?: Record<string, string>;
+  documentId?: string;
+  onOpenCardLink?: (cardId: string) => void;
   canLeaveEditing?: boolean;
   canCreateStructure: boolean;
   contentJson: string;
@@ -68,8 +75,8 @@ function ensureTabKeyListeners() {
 
 function selectionTextOffsets(editor: Editor) {
   const { doc, selection } = editor.state;
-  const before = doc.textBetween(0, selection.from, "\n\n");
-  const selected = doc.textBetween(selection.from, selection.to, "\n\n");
+  const before = doc.textBetween(0, selection.from, "\n\n", "\ufffc");
+  const selected = doc.textBetween(selection.from, selection.to, "\n\n", "\ufffc");
 
   return {
     end: before.length + selected.length,
@@ -78,11 +85,11 @@ function selectionTextOffsets(editor: Editor) {
 }
 
 function editorIsEffectivelyEmpty(editor: Editor) {
-  return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n").trim().length === 0;
+  return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n", "\ufffc").trim().length === 0;
 }
 
 function editorTextLength(editor: Editor) {
-  return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n").length;
+  return editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n\n", "\ufffc").length;
 }
 
 function contentAroundDivide(editor: Editor, from: number, to: number): SplitCardContent {
@@ -152,6 +159,9 @@ export function isSelectionAtCardBoundary(
 }
 
 export function CardEditor({
+  onRevealSelection,
+  selectionViewportKey,
+  cardLabels, documentId, onOpenCardLink,
   canLeaveEditing = true,
   canCreateStructure,
   contentJson,
@@ -186,6 +196,22 @@ export function CardEditor({
   const tabHeldRef = useRef(false);
   const wasEditingRef = useRef(false);
   const editorRef = useRef<Editor | null>(null);
+  const revealSelectionRef = useRef(onRevealSelection);
+  const revealFrameRef = useRef<number | null>(null);
+  revealSelectionRef.current = onRevealSelection;
+  function revealSelection(currentEditor: Editor) {
+    if (!currentEditor.isDestroyed && currentEditor.isFocused && revealSelectionRef.current) {
+      const bounds = currentEditor.view.coordsAtPos(currentEditor.state.selection.head);
+      revealSelectionRef.current(bounds);
+    }
+  }
+  function scheduleSelectionReveal(currentEditor: Editor) {
+    if (revealFrameRef.current !== null) cancelAnimationFrame(revealFrameRef.current);
+    revealFrameRef.current = requestAnimationFrame(() => {
+      revealFrameRef.current = null;
+      revealSelection(currentEditor);
+    });
+  }
   const isTabHeld = () => tabHeldRef.current || tabKeyHeldAcrossEditors;
   function createOrOpenPassageAnchor(currentEditor: Editor) {
     const { state } = currentEditor;
@@ -227,10 +253,18 @@ export function CardEditor({
       state.tr.addMark(from, to, anchorType.create({ childCardId })).doc.toJSON(),
     ));
   }
+  const linkContext = useRef({ cardLabels, documentId, onOpenCardLink });
+  linkContext.current = { cardLabels, documentId, onOpenCardLink };
+
   const editor = useEditor({
     autofocus: false,
     content: JSON.parse(contentJson),
     editorProps: {
+      handleScrollToSelection() {
+        if (!revealSelectionRef.current) return false;
+        if (editorRef.current) scheduleSelectionReveal(editorRef.current);
+        return true;
+      },
       attributes: {
         class:
           "fc-editor w-full min-h-[1.5rem] outline-none font-[var(--fc-font-content)] text-[length:var(--fc-content-size)] leading-[var(--fc-content-line-height)] text-[var(--fc-color-text)]",
@@ -256,6 +290,12 @@ export function CardEditor({
       },
       handleKeyDown(_, event): boolean {
         const currentEditor = editorRef.current;
+
+        if (currentEditor && event.key === " " && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey &&
+          convertTypedCardLink(currentEditor, linkContext.current.cardLabels ?? {})) {
+          event.preventDefault();
+          return true;
+        }
 
         if (!currentEditor) {
           return false;
@@ -431,7 +471,7 @@ export function CardEditor({
 
             const offsets = selectionTextOffsets(currentEditor);
             onSplitAtSelection(offsets.start, offsets.end,
-              JSON.stringify(currentEditor.getJSON()).includes(PASSAGE_ANCHOR_MARK)
+              [PASSAGE_ANCHOR_MARK, CARD_LINK_NODE].some((type) => JSON.stringify(currentEditor.getJSON()).includes(type))
                 ? contentAroundDivide(currentEditor, currentEditor.state.selection.from, currentEditor.state.selection.to)
                 : undefined);
             return true;
@@ -513,6 +553,11 @@ export function CardEditor({
     },
     extensions: [
       PassageAnchorMark,
+      CardLinkNode.configure({
+        getLabels: () => linkContext.current.cardLabels ?? {},
+        getDocumentId: () => linkContext.current.documentId,
+        onOpen: (id) => linkContext.current.onOpenCardLink?.(id),
+      }),
       Placeholder.configure({
         emptyEditorClass: "is-editor-empty",
         placeholder,
@@ -531,10 +576,27 @@ export function CardEditor({
     },
     onUpdate({ editor: nextEditor }) {
       onUpdateContent(JSON.stringify(nextEditor.getJSON()));
+      scheduleSelectionReveal(nextEditor);
+    },
+    onSelectionUpdate({ editor: nextEditor }) {
+      scheduleSelectionReveal(nextEditor);
     },
   });
 
   editorRef.current = editor;
+
+  useEffect(() => {
+    if (!editor || !isEditing) return;
+    scheduleSelectionReveal(editor);
+  }, [editor, selectionViewportKey]);
+
+  useEffect(() => () => {
+    if (revealFrameRef.current !== null) cancelAnimationFrame(revealFrameRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta("cardLinkLabels", true));
+  }, [editor, cardLabels]);
 
   useEffect(() => {
     if (!editor) {
@@ -544,7 +606,7 @@ export function CardEditor({
     editor.setEditable(isEditing);
 
     if (isEditing && !wasEditingRef.current) {
-      editor.commands.focus("end");
+      editor.commands.focus(undefined, { scrollIntoView: false });
     } else if (!isEditing && wasEditingRef.current) {
       editor.commands.blur();
     }
@@ -605,7 +667,7 @@ export function CardEditor({
       if (action === "split" && canCreateStructure) {
         const offsets = selectionTextOffsets(editor);
         onSplitAtSelection(offsets.start, offsets.end,
-          JSON.stringify(editor.getJSON()).includes(PASSAGE_ANCHOR_MARK)
+          [PASSAGE_ANCHOR_MARK, CARD_LINK_NODE].some((type) => JSON.stringify(editor.getJSON()).includes(type))
             ? contentAroundDivide(editor, editor.state.selection.from, editor.state.selection.to)
             : undefined);
       }

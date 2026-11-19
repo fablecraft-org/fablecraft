@@ -3,7 +3,6 @@ import {
   applyUiTokens,
   defaultUiPreferences,
   normalizeUiPreferences,
-  type UiCardWidth,
   type UiFont,
   type UiLineHeight,
   type UiNeighborCards,
@@ -18,7 +17,6 @@ const SETTINGS_STORAGE_KEY = "fablecraft.ui-settings";
 interface SettingsState {
   preferences: UiPreferences;
   resetPreferences: () => void;
-  setCardWidth: (cardWidth: UiCardWidth) => void;
   setFont: (font: UiFont) => void;
   setLineHeight: (lineHeight: UiLineHeight) => void;
   setNeighborCards: (neighborCards: UiNeighborCards) => void;
@@ -68,13 +66,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   resetPreferences: () =>
     set(() => ({
       preferences: commitPreferences(defaultUiPreferences),
-    })),
-  setCardWidth: (cardWidth) =>
-    set((state) => ({
-      preferences: commitPreferences({
-        ...state.preferences,
-        cardWidth,
-      }),
     })),
   setFont: (font) =>
     set((state) => ({

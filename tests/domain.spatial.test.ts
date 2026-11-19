@@ -173,6 +173,66 @@ describe("document spatial helpers", () => {
     expect(previousCardInColumn(snapshot.cards, "card-c")).toBe("card-b");
   });
 
+  it.each(["child", "parent", "empty"] as const)(
+    "aligns other branches with their parents across tall intervening cards (%s selected)",
+    (selection) => {
+      const snapshot = makeDocumentSnapshot();
+      snapshot.cards = snapshot.cards.filter((card) => card.id === "card-root");
+      for (let index = 0; index < 5; index += 1) {
+        snapshot.cards.push({
+          documentId: "doc-1", id: `parent-${index}`, parentId: "card-root",
+          orderIndex: index, type: "card",
+        });
+        if (index % 2 === 0 && !(selection === "empty" && index === 2)) {
+          snapshot.cards.push({
+            documentId: "doc-1", id: `child-${index}`, parentId: `parent-${index}`,
+            orderIndex: 0, type: "card",
+          });
+        }
+      }
+      const positioned = stageLayout(
+        snapshot.cards, selection === "child" ? "child-2" : "parent-2", {
+          cardHeight: 84, cardWidth: 468, spacing: 24,
+          cardHeights: { "parent-1": 420, "parent-3": 420, "parent-0": 180 },
+        },
+      ).cards;
+      const layout = new Map(positioned.map((card) => [card.cardId, card]));
+
+      for (const index of [0, 4]) {
+        const parent = layout.get(`parent-${index}`)!;
+        const child = layout.get(`child-${index}`)!;
+        expect(child.y - child.height / 2).toBe(parent.y - parent.height / 2);
+      }
+      expect(layout.get(selection === "child" ? "child-2" : "parent-2")?.y).toBe(0);
+    },
+  );
+
+  it("pushes other parent groups outward only as far as necessary to prevent overlap", () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push({
+      documentId: "doc-1", id: "card-c", parentId: "card-root", orderIndex: 2, type: "card",
+    });
+    for (const parent of ["card-a", "card-b", "card-c"]) {
+      snapshot.cards.push({
+        documentId: "doc-1", id: `${parent}-child`, parentId: parent, orderIndex: 0, type: "card",
+      });
+    }
+    const positioned = stageLayout(snapshot.cards, "card-b-child", {
+      cardHeight: 84, cardWidth: 468, spacing: 24,
+      cardHeights: { "card-a-child": 300, "card-b-child": 260, "card-c-child": 300 },
+    }).cards;
+    const layout = new Map(positioned.map((card) => [card.cardId, card]));
+    const active = layout.get("card-b-child")!;
+    const above = layout.get("card-a-child")!;
+    const below = layout.get("card-c-child")!;
+
+    expect(active.y).toBe(0);
+    expect(above.y + above.height / 2 + 24).toBe(active.y - active.height / 2);
+    expect(below.y - below.height / 2 - 24).toBe(active.y + active.height / 2);
+    expect(above.y - above.height / 2).toBeLessThan(layout.get("card-a")!.y - 42);
+    expect(below.y - below.height / 2).toBeGreaterThan(layout.get("card-c")!.y - 42);
+  });
+
   it("aligns the parent and pins the first child to the active card", () => {
     const snapshot = makeDocumentSnapshot();
     snapshot.cards.push(

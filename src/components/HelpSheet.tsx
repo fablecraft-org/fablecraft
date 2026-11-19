@@ -19,15 +19,20 @@ const shortcutRows = [
   ["Shift + Left", "Outdent the current card"],
   ["Shift + Right", "Indent under the sibling above as its last child"],
   ["Option + Up / Down", "Merge with the sibling above or below"],
-  ["Cmd/Ctrl + C", "Copy the active card content in navigation mode"],
+  ["Cmd/Ctrl + C", "Copy the active card in navigation mode"],
   ["Cmd/Ctrl + X", "Cut the active card and its children in navigation mode"],
-  ["Cmd/Ctrl + V", "Paste a Fablecraft card into an empty card in navigation mode"],
+  ["Cmd/Ctrl + V", "Paste card content in navigation mode, or a link to a copied card while editing"],
+  ["#B8 / #B08 + Space", "Insert a link and a reference child to an existing card"],
+  ["Right, then Up", "Enter owned children first, then explore reference cards above them"],
+  ["Enter on a reference", "Jump to the original card to edit"],
   ["Cmd/Ctrl + S", "Flush pending changes immediately"],
   ["Cmd/Ctrl + F", "Search the document"],
   ["Cmd/Ctrl + K", "Toggle the command palette"],
+  ["Cmd/Ctrl + − / +", "Step between Wide Lens, Normal, and Focused views"],
 ];
 
 const commandGroups = [
+  { commands: ["Wide Lens", "Normal", "Focused"], label: "View" },
   {
     commands: ["New Document", "Open Document", "Import Markdown", "Export Level (MD / HTML)"],
     label: "Document",

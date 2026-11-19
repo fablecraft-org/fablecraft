@@ -173,6 +173,32 @@ describe("document tree operations", () => {
     ]);
   });
 
+  it("indents a root card with its subtree under the previous root's existing children", () => {
+    let snapshot = createSiblingAfter(makeDocumentSnapshot(), "card-root", "root-second");
+    snapshot = createSiblingAfter(snapshot, "root-second", "root-third");
+    snapshot = createChildCard(snapshot, "root-second", "second-child");
+    snapshot = createChildCard(snapshot, "second-child", "second-grandchild");
+
+    const nextSnapshot = indentCardUnderPreviousSibling(snapshot, "root-second");
+    const orderedGroup = (parentId: string | null) => nextSnapshot.cards
+      .filter((card) => card.parentId === parentId)
+      .sort((left, right) => left.orderIndex - right.orderIndex)
+      .map((card) => [card.id, card.orderIndex]);
+
+    expect(orderedGroup(null)).toEqual([["card-root", 0], ["root-third", 1]]);
+    expect(orderedGroup("card-root")).toEqual([["card-a", 0], ["card-b", 1], ["root-second", 2]]);
+    expect(orderedGroup("root-second")).toEqual([["second-child", 0]]);
+    expect(orderedGroup("second-child")).toEqual([["second-grandchild", 0]]);
+    expect(nextSnapshot.contents).toEqual(snapshot.contents);
+    expect(snapshot.cards.find((card) => card.id === "root-second")?.parentId).toBeNull();
+  });
+
+  it("leaves the first root card unchanged when there is no sibling above", () => {
+    const snapshot = createSiblingAfter(makeDocumentSnapshot(), "card-root", "root-second");
+
+    expect(indentCardUnderPreviousSibling(snapshot, "card-root")).toEqual(snapshot);
+  });
+
   it("merges the sibling above into the active card and preserves child order", () => {
     let snapshot = makeDocumentSnapshot();
     snapshot = createChildCard(snapshot, "card-a", "card-a-1");

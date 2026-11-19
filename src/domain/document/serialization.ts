@@ -1,3 +1,4 @@
+import { normalizeCardLinkLabels } from "./cardLinks";
 import type { CardContentRecord, CardRecord, DocumentSnapshot, EditableDocumentSnapshot, RevisionRecord } from "./types";
 import { normalizePassageAnchors } from "./passageAnchors";
 
@@ -46,7 +47,7 @@ export function normalizeEditableDocumentSnapshot(
 ): EditableDocumentSnapshot {
   return {
     cards: normalizeCards(snapshot.cards),
-    contents: normalizeContents(normalizePassageAnchors(snapshot.cards, snapshot.contents)),
+    contents: normalizeContents(normalizeCardLinkLabels(snapshot.cards, normalizePassageAnchors(snapshot.cards, snapshot.contents))),
     documentId: snapshot.documentId,
   };
 }
@@ -54,7 +55,7 @@ export function normalizeEditableDocumentSnapshot(
 export function normalizeDocumentSnapshot(snapshot: DocumentSnapshot): DocumentSnapshot {
   return {
     cards: normalizeCards(snapshot.cards),
-    contents: normalizeContents(normalizePassageAnchors(snapshot.cards, snapshot.contents)),
+    contents: normalizeContents(normalizeCardLinkLabels(snapshot.cards, normalizePassageAnchors(snapshot.cards, snapshot.contents))),
     revisions: normalizeRevisions(snapshot.revisions),
     summary: snapshot.summary,
   };

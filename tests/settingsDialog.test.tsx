@@ -39,9 +39,10 @@ describe("SettingsDialog", () => {
 
     expect(container.querySelectorAll("select")).toHaveLength(0);
     expect(container.querySelectorAll('section[data-testid^="setting-row-"]')).toHaveLength(
-      7,
+      6,
     );
     expect(container.textContent).toContain("Text Size");
+    expect(container.querySelector('[data-testid="setting-row-card-width"]')).toBeNull();
     expect(container.textContent).toContain("Trackpad Pan");
     expect(container.textContent).toContain("Light");
     expect(container.textContent).toContain("Dark");
@@ -174,7 +175,7 @@ describe("SettingsDialog", () => {
       expectOnlyChevron(index % rows.length);
     }
     press("ArrowUp");
-    expectOnlyChevron(6);
+    expectOnlyChevron(5);
 
     const before = { ...useSettingsStore.getState().preferences };
     press("ArrowRight");
@@ -182,7 +183,7 @@ describe("SettingsDialog", () => {
       ...before,
       scrollPan: "disabled",
     });
-    expectOnlyChevron(6);
+    expectOnlyChevron(5);
 
     act(() => {
       rows[1]!.querySelectorAll("button")[1]!.click();

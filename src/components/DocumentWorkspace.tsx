@@ -1,8 +1,10 @@
+import { arrangeWritingStage, writingViewport } from "../domain/document/writingLayout";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { CardEditor } from "./CardEditor";
 import { OverlayShell } from "./OverlayShell";
 import { TreeCardButton } from "./TreeCardButton";
 import { CardIdentity } from "./CardIdentity";
+import { referenceTree } from "../domain/document/references";
 import { buildDescendantCountMap } from "../domain/document/descendantCounts";
 import { buildCardNumberMap } from "../domain/document/cardNumbers";
 import {
@@ -50,7 +52,7 @@ import { useAppStore } from "../state/appStore";
 import { useDocumentStore } from "../state/documentStore";
 import { useInteractionStore } from "../state/interactionStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { resolveUiMetrics, type UiPreferences } from "../styles/tokens";
+import { writingLayoutTokens, resolveUiMetrics, type UiPreferences } from "../styles/tokens";
 import type { DocumentSnapshot } from "../domain/document/types";
 import type { DocumentSummary } from "../types/document";
 
@@ -80,7 +82,7 @@ const OVERVIEW_SCALE = 0.82;
 const OVERVIEW_SIBLING_GAP = 18;
 const OVERVIEW_PREFERRED_SIBLING_CENTER_GAP = 148;
 const OVERVIEW_MAX_SIBLING_CENTER_GAP = 200;
-const ACTIVE_CARD_VIEWPORT_BUFFER = 48;
+const ACTIVE_CARD_VIEWPORT_BUFFER = writingLayoutTokens.verticalInset;
 const RECENTER_WHEEL_SUPPRESSION_MS = 700;
 
 function estimateRichCardHeight(
@@ -266,8 +268,17 @@ function descendantCardIds(cards: DocumentSnapshot["cards"], cardId: string) {
   return descendants;
 }
 
+function previouslyVisitedSurvivingCardId(snapshot: DocumentSnapshot, cardId: string) {
+  const removedIds = new Set([cardId, ...descendantCardIds(snapshot.cards, cardId)]);
+  const survivingIds = new Set(
+    snapshot.cards.filter((card) => !removedIds.has(card.id)).map((card) => card.id),
+  );
+  return useInteractionStore.getState().previousCardIds.find((id) => survivingIds.has(id));
+}
+
 function fallbackCardIdAfterDelete(snapshot: DocumentSnapshot, cardId: string) {
   return (
+    previouslyVisitedSurvivingCardId(snapshot, cardId) ??
     nextCardInColumn(snapshot.cards, cardId) ??
     previousCardInColumn(snapshot.cards, cardId) ??
     parentCardId(snapshot.cards, cardId) ??
@@ -277,6 +288,7 @@ function fallbackCardIdAfterDelete(snapshot: DocumentSnapshot, cardId: string) {
 
 function fallbackCardIdAfterEmptyAbandon(snapshot: DocumentSnapshot, cardId: string) {
   return (
+    previouslyVisitedSurvivingCardId(snapshot, cardId) ??
     parentCardId(snapshot.cards, cardId) ??
     fallbackCardIdAfterDelete(snapshot, cardId)
   );
@@ -291,6 +303,7 @@ export function DocumentWorkspace({
   onOpenDocumentPath,
   suspendKeyboard = false,
 }: DocumentWorkspaceProps) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const activeCardShellRef = useRef<HTMLDivElement | null>(null);
   const cardClipboardFallbackRef = useRef<{
     payload: CardClipboardPayload;
@@ -306,6 +319,7 @@ export function DocumentWorkspace({
   const tabKeyHeldRef = useRef(false);
   const previousCenterTargetRef = useRef<{
     activeCardId: string | null;
+    appearanceId: string | null;
     documentId: string;
   } | null>(null);
   const wheelPanSuppressedUntilRef = useRef(0);
@@ -313,9 +327,12 @@ export function DocumentWorkspace({
   const [pendingEditorFocusPlacement, setPendingEditorFocusPlacement] =
     useState<EditorFocusPlacement | null>(null);
   const [pendingEditorTextInput, setPendingEditorTextInput] = useState<string | null>(null);
-  const [isOverviewMode, setIsOverviewMode] = useState(false);
+  const [viewMode, setViewMode] = useState<"wide-lens" | "normal" | "focused">("normal");
+  const isOverviewMode = viewMode === "wide-lens";
+  const isFocusedMode = viewMode === "focused";
   const [stageOffset, setStageOffset] = useState({ x: 0, y: 0 });
   const [cardHeights, setCardHeights] = useState<Record<string, number>>({});
+  const [workspaceViewportWidth, setWorkspaceViewportWidth] = useState(() => typeof window === "undefined" ? 1440 : window.innerWidth);
   const [workspaceViewportHeight, setWorkspaceViewportHeight] =
     useState(viewportHeight);
   const [directory, setDirectory] = useState<FableDirectory | null>(null);
@@ -336,12 +353,18 @@ export function DocumentWorkspace({
   const [renameDraft, setRenameDraft] = useState("");
   const activeCardId = useInteractionStore((state) => state.activeCardId);
   const setActiveCardId = useInteractionStore((state) => state.setActiveCardId);
+  const referencePath = useInteractionStore((state) => state.referencePath);
+  const setActiveAppearance = useInteractionStore((state) => state.setActiveAppearance);
+  const clearReferencePath = useInteractionStore((state) => state.clearReferencePath);
   const rememberedChildIds = useInteractionStore((state) => state.rememberedChildIds);
   const rememberChild = useInteractionStore((state) => state.rememberChild);
   const clearChildMemory = useInteractionStore((state) => state.clearChildMemory);
+  const clearCardVisitHistory = useInteractionStore((state) => state.clearCardVisitHistory);
   useEffect(() => {
     clearChildMemory();
-  }, [document.documentId, clearChildMemory]);
+    clearCardVisitHistory();
+    clearReferencePath();
+  }, [document.documentId, clearChildMemory, clearCardVisitHistory, clearReferencePath]);
   const mode = useAppStore((state) => state.mode);
   const setMode = useAppStore((state) => state.setMode);
   const setNotice = useAppStore((state) => state.setNotice);
@@ -357,7 +380,9 @@ export function DocumentWorkspace({
   const undoEditing = useDocumentStore((state) => state.undoEditing);
   const updateSnapshot = useDocumentStore((state) => state.updateSnapshot);
   const updateSummary = useDocumentStore((state) => state.updateSummary);
-  const uiMetrics = resolveUiMetrics(uiPreferences);
+  const directoryMetrics = resolveUiMetrics(uiPreferences);
+  const writing = writingViewport(workspaceViewportWidth, writingLayoutTokens, isFocusedMode);
+  const uiMetrics = { ...directoryMetrics, cardWidth: writing.cardWidth };
 
   function updateCardHeight(
     cardId: string,
@@ -468,6 +493,13 @@ export function DocumentWorkspace({
 
   const activeSnapshot =
     snapshot?.summary.documentId === document.documentId ? snapshot : null;
+  const referenceLayout = activeSnapshot ? referenceTree(activeSnapshot, activeCardId, referencePath) : null;
+  const activeAppearanceId = referenceLayout?.activeId ?? activeCardId;
+  const activeAppearance = activeAppearanceId ? referenceLayout?.appearances.get(activeAppearanceId) : undefined;
+  const isReferenceView = activeAppearance?.isReference ?? false;
+  const isAliasCard = activeAppearance?.isAlias ?? false;
+  const layoutCards = referenceLayout?.cards ?? [];
+  const layoutRememberedChildren = { ...rememberedChildIds, ...referenceLayout?.preferredChildren };
   const isExplorerSelectionActive = explorerSelection.kind !== "card";
   const selectedDirectoryEntry =
     explorerSelection.kind === "entry"
@@ -549,6 +581,10 @@ export function DocumentWorkspace({
             })
         )
       : {};
+  const appearanceHeights = Object.fromEntries(layoutCards.map((card) => {
+    const occurrence = referenceLayout?.appearances.get(card.id);
+    return [card.id, occurrence ? measuredCardHeights[occurrence.cardId] ?? uiMetrics.cardHeight : uiMetrics.cardHeight];
+  }));
   const selectedCard =
     activeSnapshot?.cards.find((card) => card.id === activeCardId) ?? null;
   const selectedCardContent =
@@ -590,17 +626,17 @@ export function DocumentWorkspace({
     : uiMetrics;
   const normalStageLayoutResult =
     activeSnapshot && activeCardId && !isOverviewMode
-      ? stageLayout(activeSnapshot.cards, activeCardId, {
+      ? arrangeWritingStage(stageLayout(layoutCards, activeAppearanceId!, {
           cardHeight: uiMetrics.cardHeight,
-          cardHeights: measuredCardHeights,
+          cardHeights: appearanceHeights,
           cardWidth: uiMetrics.cardWidth,
           spacing: uiMetrics.spacing,
-          rememberedChildIds,
-        })
+          rememberedChildIds: layoutRememberedChildren,
+        }), layoutCards, activeAppearanceId!, layoutRememberedChildren, workspaceViewportHeight, writingLayoutTokens)
       : { cards: [], emptyChildGap: null };
   const overviewLayoutResult =
     activeSnapshot && activeCardId && isOverviewMode
-      ? overviewTreeLayout(activeSnapshot.cards, activeCardId, {
+      ? overviewTreeLayout(layoutCards, activeAppearanceId!, {
           cardHeight: overviewMetrics.cardHeight,
           cardWidth: overviewMetrics.cardWidth,
           columnGap: OVERVIEW_COLUMN_GAP,
@@ -614,27 +650,44 @@ export function DocumentWorkspace({
     : normalStageLayoutResult.cards;
   const visibleAncestorIds = new Set(
     activeSnapshot && activeCardId
-      ? ancestorsOfCard(activeSnapshot.cards, activeCardId).map((card) => card.id)
+      ? ancestorsOfCard(layoutCards, activeAppearanceId!).map((card) => card.id)
       : [],
   );
-  const positionedCards =
-    activeSnapshot
-      ? stageCards.filter((position) =>
-          isOverviewMode || position.isNeighborhood || visibleAncestorIds.has(position.cardId),
-        ).map((position) => ({
-          ...position,
-          contentJson: cardContent(activeSnapshot, position.cardId),
-          parentId:
-            activeSnapshot.cards.find((card) => card.id === position.cardId)
-              ?.parentId ?? null,
-        }))
-      : [];
+  const layoutCardById = new Map(layoutCards.map((card) => [card.id, card]));
+  const activeLayoutCard = activeAppearanceId ? layoutCardById.get(activeAppearanceId) : undefined;
+  const directChildren = new Set(layoutCards.filter((card) => card.parentId === activeAppearanceId).map((card) => card.id));
+  const positionedCards = activeSnapshot
+    ? stageCards.filter((position) => {
+        if (isOverviewMode) return true;
+        if (isFocusedMode) return position.isActive || Boolean(activeLayoutCard &&
+          layoutCardById.get(position.cardId)?.parentId === activeLayoutCard.parentId);
+        const depth = Math.round(position.x / (uiMetrics.cardWidth + uiMetrics.spacing));
+        const card = layoutCardById.get(position.cardId);
+        return depth >= writing.minimumDepth && depth <= writing.maximumDepth &&
+          (position.isNeighborhood || visibleAncestorIds.has(position.cardId) ||
+            (writing.columns === 4 && Boolean(card?.parentId && directChildren.has(card.parentId))));
+      }).map((position) => ({
+        ...position,
+        x: position.x + (isOverviewMode ? 0 : writing.activeX),
+        appearance: referenceLayout!.appearances.get(position.cardId)!,
+        contentJson: cardContent(activeSnapshot, referenceLayout!.appearances.get(position.cardId)!.cardId),
+        parentId: layoutCardById.get(position.cardId)?.parentId ?? null,
+      }))
+    : [];
+  const focusedNavigationDirections = isFocusedMode && !isExplorerSelectionActive && activeAppearanceId
+    ? [
+        { direction: "up", available: Boolean(previousCardInColumn(layoutCards, activeAppearanceId)), rotation: 270 },
+        { direction: "down", available: Boolean(nextCardInColumn(layoutCards, activeAppearanceId)), rotation: 90 },
+        { direction: "left", available: Boolean(parentCardId(layoutCards, activeAppearanceId) || (selectedCard?.parentId === null && directory)), rotation: 180 },
+        { direction: "right", available: Boolean(preferredChildCardId(layoutCards, activeAppearanceId, layoutRememberedChildren)), rotation: 0 },
+      ].filter((item) => item.available)
+    : [];
   const columnWidth = uiMetrics.cardWidth + uiMetrics.spacing;
-  const explorerCardWidth = Math.round(uiMetrics.cardWidth / 2);
+  const explorerCardWidth = Math.round(directoryMetrics.cardWidth / 2);
   const explorerGap = uiMetrics.spacing;
   const explorerColumnWidth = explorerCardWidth + explorerGap;
   const explorerToDocumentOffset =
-    explorerCardWidth / 2 + uiMetrics.cardWidth / 2 + explorerGap;
+    explorerCardWidth / 2 + directoryMetrics.cardWidth / 2 + explorerGap;
   const shouldShowDocumentTree = !isExplorerSelectionActive;
   const currentDocumentName = directory
     ? documentNameWithoutExtension(directory.currentDocumentPath)
@@ -717,7 +770,8 @@ export function DocumentWorkspace({
       Math.max(limit, Math.abs(previewEntryY(index)) + uiMetrics.cardHeight),
     uiMetrics.cardHeight,
   );
-  const emptyChildGap = isOverviewMode ? null : normalStageLayoutResult.emptyChildGap;
+  const emptyChildGap = isOverviewMode || isFocusedMode || writing.maximumDepth < 1 || !normalStageLayoutResult.emptyChildGap
+    ? null : { ...normalStageLayoutResult.emptyChildGap, x: normalStageLayoutResult.emptyChildGap.x + writing.activeX };
   const overviewConnectors = isOverviewMode ? overviewLayoutResult.connectors : [];
   const stagePanLimit = positionedCards.reduce(
     (limits, card) => ({
@@ -751,8 +805,8 @@ export function DocumentWorkspace({
   const highlightedOverviewConnectorChildIds = new Set(
     activeSnapshot && activeCardId && isOverviewMode
       ? [
-          activeCardId,
-          ...ancestorsOfCard(activeSnapshot.cards, activeCardId).map(
+          activeAppearanceId!,
+          ...ancestorsOfCard(layoutCards, activeAppearanceId!).map(
             (ancestor) => ancestor.id,
           ),
         ]
@@ -761,8 +815,8 @@ export function DocumentWorkspace({
   const highlightedOverviewConnectorParentIds = new Set(
     activeSnapshot && activeCardId && isOverviewMode
       ? [
-          activeCardId,
-          ...descendantCardIds(activeSnapshot.cards, activeCardId),
+          activeAppearanceId!,
+          ...descendantCardIds(layoutCards, activeAppearanceId!),
         ]
       : [],
   );
@@ -772,10 +826,10 @@ export function DocumentWorkspace({
 
   function focusCardForEditing(
     nextCardId: string | null,
-    placement: EditorFocusPlacement = "end",
+    placement: EditorFocusPlacement | null = "end",
     textInput: string | null = null,
   ) {
-    if (!nextCardId) {
+    if (!nextCardId || !useDocumentStore.getState().snapshot?.cards.some((card) => card.id === nextCardId)) {
       return false;
     }
 
@@ -1221,6 +1275,7 @@ export function DocumentWorkspace({
   }
 
   function createRelativeCard(direction: "before" | "after" | "child") {
+    if (isReferenceView) setActiveCardId(activeCardId);
     if (!selectedCard || !selectedCardContent || !canCreateCardsFromContent(selectedCardContent)) {
       return false;
     }
@@ -1239,6 +1294,15 @@ export function DocumentWorkspace({
     });
 
     return focusCardForEditing(newCardId, "end");
+  }
+
+  function openCardLink(cardId: string) {
+    if (!useDocumentStore.getState().snapshot?.cards.some((card) => card.id === cardId)) return;
+    preserveDocumentTreeExplorerContext();
+    setActiveCardId(cardId);
+    setPendingEditorFocusPlacement(null);
+    setPendingEditorTextInput(null);
+    setMode("navigation");
   }
 
   function openAnchoredChild(sourceCardId: string, childId: string) {
@@ -1262,6 +1326,7 @@ export function DocumentWorkspace({
   }
 
   function createParentLevel() {
+    if (isReferenceView) setActiveCardId(activeCardId);
     if (!selectedCard || !selectedCardContent || !canCreateCardsFromContent(selectedCardContent)) {
       return false;
     }
@@ -1300,6 +1365,7 @@ export function DocumentWorkspace({
   }
 
   function handleMergeCurrentCard(cardId: string, direction: "up" | "down") {
+    if (isReferenceView) setActiveCardId(activeCardId);
     applyNavigationChange((snapshotToChange) =>
       direction === "up"
         ? mergeCardWithPreviousSibling(snapshotToChange, cardId)
@@ -1348,11 +1414,17 @@ export function DocumentWorkspace({
     return null;
   }
 
-  function canHandleCardClipboard() {
+  function canHandleCardClipboard(allowEmptyEditingTarget = false) {
+    const currentSnapshot = useDocumentStore.getState().snapshot;
+    const isEmptyEditingTarget = allowEmptyEditingTarget && mode === "editing" &&
+      Boolean(currentSnapshot && activeCardId &&
+        isContentEffectivelyEmpty(cardContent(currentSnapshot, activeCardId)) &&
+        !currentSnapshot.cards.some((card) => card.parentId === activeCardId));
+
     return (
       !suspendKeyboard &&
       !pendingDeleteDocument &&
-      mode === "navigation" &&
+      (mode === "navigation" || isEmptyEditingTarget) &&
       explorerSelection.kind === "card" &&
       Boolean(activeSnapshot && activeCardId)
     );
@@ -1366,16 +1438,13 @@ export function DocumentWorkspace({
       return;
     }
 
-    if (action === "zoom-in" || action === "zoom-out") {
-      if (suspendKeyboard || mode === "search") {
-        return;
-      }
-
-      if (action === "zoom-in") {
-        exitOverviewMode();
-      } else {
-        enterOverviewMode();
-      }
+    if (action === "zoom-in" || action === "zoom-out" || action.startsWith("view-")) {
+      if (suspendKeyboard || mode === "search") return;
+      if (action === "zoom-in") zoomView(1);
+      else if (action === "zoom-out") zoomView(-1);
+      else if (action === "view-wide-lens") changeViewMode("wide-lens");
+      else if (action === "view-normal") changeViewMode("normal");
+      else if (action === "view-focused") changeViewMode("focused");
       return;
     }
 
@@ -1403,6 +1472,13 @@ export function DocumentWorkspace({
         redoNavigation();
       }
       return;
+    }
+
+    if (isReferenceView) {
+      if (activeAppearance?.missing || (isAliasCard && (action === "shift-up" || action === "shift-down"))) return;
+      if (["merge-with-above", "merge-below", "shift-up", "shift-down", "create-child", "create-parent", "create-above", "create-below"].includes(action)) {
+        setActiveCardId(activeCardId);
+      }
     }
 
     if (action === "merge-with-above") {
@@ -1456,24 +1532,30 @@ export function DocumentWorkspace({
       return;
     }
 
-    const nextActiveCardId =
-      activeCardId &&
-      activeSnapshot.cards.some((card) => card.id === activeCardId)
-        ? activeCardId
-        : activeSnapshot.cards.find((card) => card.parentId === null)?.id ?? null;
-
-    setActiveCardId(nextActiveCardId);
-  }, [activeCardId, activeSnapshot, setActiveCardId]);
+    if (referencePath) {
+      const requestedId = referenceLayout?.activeId;
+      const resolved = requestedId ? referenceLayout?.appearances.get(requestedId) : undefined;
+      if (resolved && (resolved.cardId !== activeCardId || JSON.stringify(resolved.path) !== JSON.stringify(referencePath))) {
+        setActiveAppearance(resolved.path);
+      }
+      return;
+    }
+    const nextActiveCardId = activeCardId && activeSnapshot.cards.some((card) => card.id === activeCardId)
+      ? activeCardId : activeSnapshot.cards.find((card) => card.parentId === null)?.id ?? null;
+    if (nextActiveCardId !== activeCardId) setActiveCardId(nextActiveCardId);
+  }, [activeCardId, activeSnapshot, referencePath, setActiveCardId, setActiveAppearance]);
 
   useLayoutEffect(() => {
     const previousCenterTarget = previousCenterTargetRef.current;
     const centerTargetChanged =
       previousCenterTarget !== null &&
       (previousCenterTarget.activeCardId !== activeCardId ||
+        previousCenterTarget.appearanceId !== activeAppearanceId ||
         previousCenterTarget.documentId !== document.documentId);
 
     previousCenterTargetRef.current = {
       activeCardId,
+      appearanceId: activeAppearanceId,
       documentId: document.documentId,
     };
 
@@ -1483,22 +1565,26 @@ export function DocumentWorkspace({
     }
 
     setStageOffset({ x: 0, y: 0 });
-  }, [activeCardId, document.documentId]);
+  }, [activeCardId, activeAppearanceId, document.documentId]);
 
   useEffect(() => {
-    setIsOverviewMode(false);
+    setViewMode("normal");
   }, [document.documentId]);
 
   useEffect(() => {
     function updateViewportHeight() {
-      setWorkspaceViewportHeight(viewportHeight());
+      setWorkspaceViewportHeight(stageRef.current?.clientHeight || viewportHeight());
+      setWorkspaceViewportWidth(stageRef.current?.clientWidth || window.innerWidth);
     }
 
     updateViewportHeight();
     window.addEventListener("resize", updateViewportHeight);
+    const observer = new ResizeObserver(updateViewportHeight);
+    if (stageRef.current) observer.observe(stageRef.current);
 
     return () => {
       window.removeEventListener("resize", updateViewportHeight);
+      observer.disconnect();
     };
   }, []);
 
@@ -1753,20 +1839,17 @@ export function DocumentWorkspace({
     );
   }
 
-  function enterOverviewMode() {
+  function changeViewMode(next: typeof viewMode) {
     setStageOffset({ x: 0, y: 0 });
     setPendingEditorFocusPlacement(null);
     setPendingEditorTextInput(null);
-    setIsOverviewMode(true);
+    setViewMode(next);
     setMode("navigation");
   }
 
-  function exitOverviewMode() {
-    setStageOffset({ x: 0, y: 0 });
-    setPendingEditorFocusPlacement(null);
-    setPendingEditorTextInput(null);
-    setIsOverviewMode(false);
-    setMode("navigation");
+  function zoomView(direction: -1 | 1) {
+    const modes = ["wide-lens", "normal", "focused"] as const;
+    changeViewMode(modes[Math.max(0, Math.min(2, modes.indexOf(viewMode) + direction))]!);
   }
 
   function handleStageWheel(event: ReactWheelEvent<HTMLDivElement>) {
@@ -1816,7 +1899,7 @@ export function DocumentWorkspace({
 
       if ((event.metaKey || event.ctrlKey) && event.key === "-") {
         event.preventDefault();
-        enterOverviewMode();
+        zoomView(-1);
         return;
       }
 
@@ -1825,13 +1908,13 @@ export function DocumentWorkspace({
         (event.key === "+" || event.key === "=")
       ) {
         event.preventDefault();
-        exitOverviewMode();
+        zoomView(1);
         return;
       }
 
       if (isOverviewMode && event.key === "Enter") {
         event.preventDefault();
-        exitOverviewMode();
+        changeViewMode("normal");
         return;
       }
 
@@ -2027,9 +2110,7 @@ export function DocumentWorkspace({
 
       if (event.key === "Enter") {
         event.preventDefault();
-        setPendingEditorFocusPlacement("end");
-        setPendingEditorTextInput(null);
-        setMode("editing");
+        focusCardForEditing(currentCardId, null);
         return;
       }
 
@@ -2037,6 +2118,19 @@ export function DocumentWorkspace({
         event.preventDefault();
         tabKeyHeldRef.current = true;
         return;
+      }
+
+      if (isReferenceView) {
+        const structural = (tabKeyHeldRef.current && event.key.startsWith("Arrow")) ||
+          (event.shiftKey && event.key.startsWith("Arrow")) ||
+          (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) ||
+          event.key === "Delete" || event.key === "Backspace";
+        if (structural && (activeAppearance?.missing || (isAliasCard &&
+          (event.shiftKey || event.key === "Delete" || event.key === "Backspace")))) {
+          event.preventDefault();
+          return;
+        }
+        if (structural) setActiveCardId(currentCardId);
       }
 
       if (tabKeyHeldRef.current) {
@@ -2150,13 +2244,13 @@ export function DocumentWorkspace({
 
       const nextCardId =
         event.key === "ArrowLeft"
-          ? parentCardId(currentSnapshot.cards, currentCardId)
+          ? parentCardId(layoutCards, activeAppearanceId!)
           : event.key === "ArrowRight"
-            ? preferredChildCardId(currentSnapshot.cards, currentCardId, rememberedChildIds)
+            ? preferredChildCardId(layoutCards, activeAppearanceId!, layoutRememberedChildren)
             : event.key === "ArrowUp"
-              ? previousCardInColumn(currentSnapshot.cards, currentCardId)
+              ? previousCardInColumn(layoutCards, activeAppearanceId!)
               : event.key === "ArrowDown"
-                ? nextCardInColumn(currentSnapshot.cards, currentCardId)
+                ? nextCardInColumn(layoutCards, activeAppearanceId!)
                 : null;
 
       if (!nextCardId) {
@@ -2187,11 +2281,12 @@ export function DocumentWorkspace({
       event.preventDefault();
       preserveDocumentTreeExplorerContext();
       if (event.key === "ArrowLeft") {
-        rememberChild(nextCardId, currentCardId);
+        rememberChild(nextCardId, activeAppearanceId!);
       } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         clearChildMemory();
       }
-      setActiveCardId(nextCardId);
+      const nextAppearance = referenceLayout?.appearances.get(nextCardId);
+      if (nextAppearance) setActiveAppearance(nextAppearance.path);
       setPendingEditorFocusPlacement(null);
       setPendingEditorTextInput(null);
     }
@@ -2217,6 +2312,8 @@ export function DocumentWorkspace({
     }
   }, [
     activeCardId,
+    referencePath,
+    activeAppearanceId,
     activeSnapshot,
     applyNavigationChange,
     directory,
@@ -2228,7 +2325,7 @@ export function DocumentWorkspace({
     folderSiblingEntries,
     activeFolderIndex,
     explorerSelection,
-    isOverviewMode,
+    viewMode,
     mode,
     previewDirectoryEntries,
     pendingDeleteDocument,
@@ -2247,7 +2344,10 @@ export function DocumentWorkspace({
   ]);
 
   useEffect(() => listenForFrontendMenuActions(handleFrontendMenuAction), [
+    viewMode,
     activeCardId,
+    referencePath,
+    activeAppearanceId,
     activeSnapshot,
     applyNavigationChange,
     canCreateStructure,
@@ -2263,9 +2363,8 @@ export function DocumentWorkspace({
 
   useEffect(() => {
     function handleCopy(event: ClipboardEvent) {
-      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) {
-        return;
-      }
+      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) return;
+      if (activeAppearance?.missing) { event.preventDefault(); return; }
 
       try {
         const payload = createCardCopyPayload(activeSnapshot, activeCardId);
@@ -2286,9 +2385,9 @@ export function DocumentWorkspace({
     }
 
     function handleCut(event: ClipboardEvent) {
-      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) {
-        return;
-      }
+      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) return;
+      if (isReferenceView && (isAliasCard || activeAppearance?.missing)) { event.preventDefault(); return; }
+      if (isReferenceView) setActiveCardId(activeCardId);
 
       try {
         const payload = createCardCutPayload(activeSnapshot, activeCardId);
@@ -2319,13 +2418,36 @@ export function DocumentWorkspace({
     }
 
     function handlePaste(event: ClipboardEvent) {
-      if (!canHandleCardClipboard() || !activeSnapshot || !activeCardId) {
+      if (isReferenceView && canHandleCardClipboard()) {
+        if (activeAppearance?.missing) { event.preventDefault(); return; }
+        setActiveCardId(activeCardId);
+      }
+      if (mode === "editing" && !suspendKeyboard && !pendingDeleteDocument && explorerSelection.kind === "card") {
+        const copied = readCardClipboardPayload(event);
+        if (copied?.operation === "copy") {
+          const snapshot = useDocumentStore.getState().snapshot;
+          if (snapshot?.summary.documentId !== copied.source.documentId ||
+            !snapshot.cards.some((card) => card.id === copied.source.rootCardId)) {
+            event.preventDefault();
+            event.stopPropagation();
+            setNotice({ tone: "error", message: "Card links require an existing card in this document." });
+          }
+          // The editor inserts copied-card references at its current selection.
+          return;
+        }
+      }
+
+      if (!canHandleCardClipboard(true) || !activeSnapshot || !activeCardId) {
         return;
       }
 
       const payload = readCardClipboardPayload(event);
 
       if (!payload) {
+        if (mode === "editing") {
+          return;
+        }
+
         event.preventDefault();
         setNotice({
           tone: "error",
@@ -2336,16 +2458,21 @@ export function DocumentWorkspace({
 
       try {
         const pasteResult = pasteCardClipboardPayloadWithResult(
-          activeSnapshot,
+          useDocumentStore.getState().snapshot ?? activeSnapshot,
           activeCardId,
           payload,
           () => randomId("card"),
         );
 
         event.preventDefault();
-        applyNavigationChange(() => pasteResult.snapshot);
+        event.stopPropagation();
+        if (mode === "editing") {
+          updateSnapshot(() => pasteResult.snapshot);
+        } else {
+          applyNavigationChange(() => pasteResult.snapshot);
+        }
         setActiveCardId(pasteResult.pastedRootCardId);
-        setPendingEditorFocusPlacement(null);
+        setPendingEditorFocusPlacement(mode === "editing" ? "end" : null);
         setPendingEditorTextInput(null);
         setNotice({
           tone: "info",
@@ -2378,6 +2505,8 @@ export function DocumentWorkspace({
     };
   }, [
     activeCardId,
+    referencePath,
+    activeAppearanceId,
     activeSnapshot,
     applyNavigationChange,
     explorerSelection.kind,
@@ -2386,6 +2515,7 @@ export function DocumentWorkspace({
     setActiveCardId,
     setNotice,
     suspendKeyboard,
+    updateSnapshot,
   ]);
 
   return (
@@ -2398,10 +2528,45 @@ export function DocumentWorkspace({
         </div>
       ) : null}
       <div
+        ref={stageRef}
+        style={{ "--fc-card-width": `${uiMetrics.cardWidth}px` } as React.CSSProperties}
+        data-view-mode={viewMode}
+        data-columns={isOverviewMode || isExplorerSelectionActive ? undefined : writing.columns}
         data-testid="document-stage"
         className="relative h-full w-full overflow-hidden"
         onWheel={handleStageWheel}
       >
+        {focusedNavigationDirections.length > 0 ? (
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[3]" data-testid="focused-navigation-hints">
+            {focusedNavigationDirections.map(({ direction, rotation }) => {
+              const vertical = direction === "up" || direction === "down";
+              return (
+                <svg
+                  key={direction}
+                  data-testid={`focused-chevron-${direction}`}
+                  className="absolute"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--fc-color-overview-connector)"
+                  strokeWidth="var(--fc-focused-navigation-stroke-width)"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{
+                    width: "var(--fc-focused-navigation-size)",
+                    height: "var(--fc-focused-navigation-size)",
+                    left: vertical ? "50%" : direction === "left" ? "var(--fc-focused-navigation-inset)" : undefined,
+                    right: direction === "right" ? "var(--fc-focused-navigation-inset)" : undefined,
+                    top: vertical ? direction === "up" ? "var(--fc-focused-navigation-top-inset)" : undefined : "50%",
+                    bottom: direction === "down" ? "var(--fc-focused-navigation-inset)" : undefined,
+                    transform: `${vertical ? "translateX(-50%)" : "translateY(-50%)"} rotate(${rotation}deg)`,
+                  }}
+                >
+                  <path d="M9 5l7 7-7 7" />
+                </svg>
+              );
+            })}
+          </div>
+        ) : null}
         {directory && !isOverviewMode && isExplorerSelectionActive ? (
           <>
             {parentFolderName && explorerSelection.kind === "folder" ? (
@@ -2609,7 +2774,7 @@ export function DocumentWorkspace({
                 d={connector.path}
                 data-child-card-id={connector.childCardId}
                 data-highlighted={
-                  connector.parentCardId === activeCardId ||
+                  connector.parentCardId === activeAppearanceId ||
                   highlightedOverviewConnectorParentIds.has(connector.parentCardId) ||
                   highlightedOverviewConnectorChildIds.has(connector.childCardId)
                     ? "true"
@@ -2620,7 +2785,7 @@ export function DocumentWorkspace({
                 fill="none"
                 key={`${connector.parentCardId}-${connector.childCardId}`}
                 stroke={
-                  connector.parentCardId === activeCardId ||
+                  connector.parentCardId === activeAppearanceId ||
                   highlightedOverviewConnectorParentIds.has(connector.parentCardId) ||
                   highlightedOverviewConnectorChildIds.has(connector.childCardId)
                     ? "var(--fc-color-overview-connector-active)"
@@ -2637,6 +2802,7 @@ export function DocumentWorkspace({
           if (
             uiPreferences.neighborCards === "hidden" &&
             !isOverviewMode &&
+            !isFocusedMode &&
             !card.isActive
           ) {
             return null;
@@ -2650,16 +2816,12 @@ export function DocumentWorkspace({
             card.height >
               workspaceViewportHeight - ACTIVE_CARD_VIEWPORT_BUFFER * 2;
           const activeCardTop = activeCardOverflowsViewport
-            ? isEditingSelectedCard
-              ? workspaceViewportHeight -
-                ACTIVE_CARD_VIEWPORT_BUFFER -
-                card.height +
-                displayY
-              : ACTIVE_CARD_VIEWPORT_BUFFER + displayY
+            ? workspaceViewportHeight / 2 + displayY - card.height / 2
             : null;
 
           return (
                 !isOverviewMode &&
+                !card.appearance.isReference &&
                 card.isActive &&
                 !isExplorerSelectionActive &&
                 selectedCard &&
@@ -2669,7 +2831,10 @@ export function DocumentWorkspace({
                     className="absolute flex w-[var(--fc-card-width)] flex-col justify-start border bg-[var(--fc-color-card-surface-active)] px-5 py-[10px] transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
                     ref={activeCardShellRef}
                     key={card.cardId}
-                    onClick={() => setMode("editing")}
+                    onClick={() => {
+                      if (!isEditingSelectedCard) setStageOffset({ x: 0, y: 0 });
+                      setMode("editing");
+                    }}
                     role="presentation"
                     style={{
                       backgroundColor: isEditingSelectedCard
@@ -2701,6 +2866,18 @@ export function DocumentWorkspace({
                       descendantCount={descendantCounts[selectedCard.id] ?? 0}
                     />
                     <CardEditor
+                      selectionViewportKey={`${workspaceViewportWidth}:${workspaceViewportHeight}:${uiPreferences.font}:${uiPreferences.textSize}:${uiPreferences.lineHeight}`}
+                      onRevealSelection={(bounds) => {
+                        const stageBounds = stageRef.current?.getBoundingClientRect();
+                        const top = (stageBounds?.top ?? 0) + writingLayoutTokens.verticalInset;
+                        const bottom = (stageBounds?.top ?? 0) + workspaceViewportHeight - writingLayoutTokens.verticalInset;
+                        const delta = bounds.top < top ? top - bounds.top
+                          : bounds.bottom > bottom ? bottom - bounds.bottom : 0;
+                        if (delta) setStageOffset((offset) => ({ ...offset, y: offset.y + delta }));
+                      }}
+                      cardLabels={cardNumbers}
+                      documentId={activeSnapshot?.summary.documentId}
+                      onOpenCardLink={openCardLink}
                       onCreateAnchoredChild={createAnchoredChild}
                       onOpenAnchoredChild={(childId) => openAnchoredChild(selectedCard.id, childId)}
                       onPassageAnchorError={(message) => setNotice({ tone: "error", message })}
@@ -2918,18 +3095,23 @@ export function DocumentWorkspace({
                   </div>
                 ) : (
                   <TreeCardButton
+                    cardLabels={cardNumbers}
+                    isReference={card.appearance.isReference}
+                    appearanceId={card.cardId}
+                    viewportTop={activeCardTop}
+                    onEdit={() => focusCardForEditing(card.appearance.cardId)}
+                    onOpenCardLink={openCardLink}
                     activeAnchoredChildId={activeCardId ?? undefined}
-                    onOpenAnchoredChild={(childId) => openAnchoredChild(card.cardId, childId)}
+                    onOpenAnchoredChild={(childId) => openAnchoredChild(card.appearance.cardId, childId)}
                     borderColor="transparent"
                     cardWidth={isOverviewMode ? OVERVIEW_CARD_WIDTH : undefined}
-                    cardLabel={cardNumbers[card.cardId] ?? card.cardId.toUpperCase()}
+                    cardLabel={card.appearance.missing ? "?" : cardNumbers[card.appearance.cardId] ?? card.appearance.cardId.toUpperCase()}
                     contentJson={card.contentJson}
-                    descendantCount={descendantCounts[card.cardId] ?? 0}
+                    descendantCount={descendantCounts[card.appearance.cardId] ?? 0}
                     placeholder={
-                      !isFirstRootCardId(card.cardId) &&
-                      isContentEffectivelyEmpty(card.contentJson)
-                        ? "empty card"
-                        : ""
+                      card.appearance.missing ? "Deleted card" :
+                        !isFirstRootCardId(card.appearance.cardId) && isContentEffectivelyEmpty(card.contentJson)
+                          ? "empty card" : ""
                     }
                     isActive={card.isActive && !isExplorerSelectionActive}
                     minHeight={isOverviewMode ? OVERVIEW_CARD_HEIGHT : undefined}
@@ -2939,12 +3121,21 @@ export function DocumentWorkspace({
                         return;
                       }
 
-                      updateCardHeight(card.cardId, height, true);
+                      updateCardHeight(card.appearance.cardId, height, true);
                     }}
                     onClick={() => {
+                      setStageOffset({ x: 0, y: 0 });
                       preserveDocumentTreeExplorerContext();
-                      setActiveCardId(card.cardId);
-                      setPendingEditorFocusPlacement(isOverviewMode ? null : "end");
+                      if (card.appearance.isReference) {
+                        if (card.isActive && !isOverviewMode) { focusCardForEditing(card.appearance.cardId); return; }
+                        setActiveAppearance(card.appearance.path);
+                        setPendingEditorFocusPlacement(null);
+                        setPendingEditorTextInput(null);
+                        setMode("navigation");
+                        return;
+                      }
+                      setActiveCardId(card.appearance.cardId);
+                      setPendingEditorFocusPlacement(isOverviewMode ? null : "start");
                       setPendingEditorTextInput(null);
                       if (!isOverviewMode) {
                         setMode("editing");

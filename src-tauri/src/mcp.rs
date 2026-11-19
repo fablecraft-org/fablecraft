@@ -1525,6 +1525,12 @@ fn collect_text(node: &Value) -> String {
                     .join("\n\n")
             })
             .unwrap_or_default(),
+        "cardLink" => node
+            .get("attrs")
+            .and_then(|attrs| attrs.get("label"))
+            .and_then(Value::as_str)
+            .unwrap_or("Missing card")
+            .to_string(),
         "hardBreak" => "\n".to_string(),
         "bulletList" | "orderedList" => node
             .get("content")
@@ -1603,6 +1609,14 @@ mod tests {
             scope: "card".to_string(),
             tool_name: tool_name.to_string(),
         }
+    }
+
+    #[test]
+    fn card_link_labels_are_included_in_plain_text() {
+        let content = json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+            {"type": "cardLink", "attrs": {"targetCardId": "fixed", "label": "B08"}}
+        ]}]});
+        assert_eq!(collect_text(&content), "B08");
     }
 
     #[test]

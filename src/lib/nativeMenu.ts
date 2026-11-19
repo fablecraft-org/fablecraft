@@ -31,6 +31,9 @@ export type NativeMenuAction =
   | "shift-up"
   | "split"
   | "undo"
+  | "view-wide-lens"
+  | "view-normal"
+  | "view-focused"
   | "zoom-in"
   | "zoom-out";
 

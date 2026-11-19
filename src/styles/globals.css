@@ -253,3 +253,34 @@ code {
 .fc-no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+.fc-card-link {
+  display: inline-block;
+  vertical-align: baseline;
+  white-space: nowrap;
+  padding: var(--fc-card-link-padding-y) var(--fc-card-link-padding-x);
+  margin-inline: var(--fc-card-link-gap);
+  border: 1px solid currentColor;
+  border-radius: var(--fc-descendant-badge-radius);
+  color: var(--fc-color-card-label);
+  font-family: var(--fc-font-ui);
+  font-size: var(--fc-card-link-font-size);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.fc-card-link:focus-visible {
+  outline: 2px solid var(--fc-color-text);
+  outline-offset: var(--fc-card-link-gap);
+}
+.fc-card-link-missing {
+  color: var(--fc-color-muted);
+  text-decoration: line-through;
+  cursor: default;
+}
+
+.fc-reference-icon {
+  width: var(--fc-reference-icon-size);
+  height: var(--fc-reference-icon-size);
+  flex: none;
+}

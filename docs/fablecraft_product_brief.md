@@ -125,7 +125,34 @@ Cards do NOT have titles.
 - Text edits within a passage retain its association. Deleting all anchored text leaves the child as an ordinary unanchored card. Deleting the child (including abandoning an empty child), or moving it to a different parent, removes the highlight without deleting source text.
 - Creation of the child and the source highlight is one editing undo/redo operation. Existing snapshot history, autosave, reopen, and descendant badges include anchored children normally.
 - Copying/pasting prose strips associations. Structural subtree paste remaps associations to the new descendant ids. Splitting a source retains anchors in text left with the original parent; text moved to a sibling loses associations to children it no longer parents. Merging cards retains associations when their children move with the merged content. Markdown/HTML export includes the prose without interactive anchors.
-- These local parent-passage associations are a narrow exception to the MVP's prohibition on general card linking. They do not add arbitrary links, authors, replies, resolution states, or collaboration.
+- Passage associations remain distinct from the arbitrary same-document references in §2.6. They do not add authors, replies, resolution states, or collaboration.
+
+
+### 2.6 Inline Card Links
+
+- Links reference an existing card in the currently open document using its fixed id. They display its current structural moniker (for example `B08`) and update when the target moves or is reordered.
+- In editing mode, typing `#B8` or `#B08` followed by Space replaces the reference with a compact outlined rounded link chip and keeps the trailing space. Conversion happens only for an existing target, at a standalone token boundary, outside inline code and code blocks. Unknown references remain ordinary text. There are no suggestions, matching-card lists, or hover previews.
+- Cmd/Ctrl+C in navigation mode still copies the selected writing card. Cmd/Ctrl+V in an editor inserts a reference to that source card at the caret or replaces the selected text, including in empty cards. Navigation-mode paste continues to copy content. Editing-mode text copy/paste remains ordinary prose copy/paste.
+- Copied-card link paste requires an existing target in the same document; another document's card or a deleted source is rejected with a notice. Cut-subtree paste retains its existing structural move behavior, including empty editing targets.
+- Chips render inline in both the active editor and surrounding cards, using centralized tokens and the card-identity visual language. Clicking a chip or focusing it and pressing Enter/Space opens the exact target in navigation mode. Arrow keys and Backspace/Delete treat the chip as a single inline object; removing it does not delete its target.
+- A card containing only a link is nonempty. Self-links and reciprocal references are allowed. Links derive navigable reference children under the rules in §2.7 without changing card ownership.
+- Deleting a target leaves a disabled, struck-through chip retaining its fixed id and last known moniker. Undoing the deletion restores the link. Another card acquiring that moniker never inherits the reference.
+- Links participate in existing editing undo/redo, snapshot autosave, and reopen. Structural subtree paste remaps internal references to the fresh copied ids and retains external references only within the same document. Cross-document external references become ordinary moniker text.
+- Markdown/HTML export and prose clipboard output include the moniker as text, without document-local interactive links.
+
+### 2.7 Reference Children (Aliases)
+
+- Each source–target pair mentioned by an inline card link produces one reference child, regardless of repeated mentions. Reference children are derived from the source's current content, not extra owned cards. Removing the last mention removes the reference child; creation/removal participates in the same content undo/redo operation.
+- Aliases appear above all owned children, ordered by their first mention in the source's prose. They cannot be manually reordered or reparented. Links to any real ancestor of the source, including grandparents, remain inline-only and do not create reference children. A link to an existing direct child still has its own distinct reference appearance.
+- Right enters the first owned child when any exists, otherwise the first alias. Up from the first owned child explores aliases above it. This owned-first rule overrides remembered-child selection for a source with visible aliases and for appearances reached through a reference. Unlinked canonical branches retain their existing remembered-child navigation.
+- An alias displays the target's current canonical label, owned-descendant count, and a chain-link icon in the top right. Descendants viewed through a reference also show the icon. Counts always exclude reference children and use only actual owned descendants.
+- Navigation tracks the displayed appearance path, not only the fixed target id. Left returns to the parent appearance through which the user entered, including through several linked levels. Up/Down follows the displayed spatial column. Selecting a reference card stays in navigation mode; Enter, typing, a second click on the active reference, or double-clicking it jumps to its canonical location before editing.
+- Reference children expose the target's owned children and references as the user traverses them. A fixed card id may occur at most twice along any displayed path, counting owned and reference appearances. A child appearance that would introduce a third occurrence is omitted entirely. Self-links and cycles therefore terminate without affecting exploration in other branches.
+- Creating a child, sibling or parent, merging, pasting card structure, or changing a subtree reached through a reference uses the underlying real card and returns to the canonical tree. A direct alias cannot be deleted or cut, nor can Shift+arrows or reorder menu commands move it. Delete/Backspace on it does nothing; users remove its inline references in the source instead. Owned descendants reached through aliases can be modified, with the same jump to their real location first.
+- Deleting the original leaves a terminal reference card with `?` as its identity and a deleted-card placeholder, with no children or editing action. It retains the fixed target id, so undoing the deletion restores the reference. Inline chips retain their disabled broken-link appearance from §2.6.
+- If the selected appearance disappears because a reference or source branch is removed, selection returns to the nearest surviving appearance along its path. Reference paths last for the current document session and reset on document changes; they do not alter persisted card identities.
+- Normal layout renders the selected reference neighborhood. Overview includes owned cards and reference entries, expanding reference branches along the currently selected path rather than recursively materializing the entire graph. Further traversal reveals the next level on demand.
+- Markdown/HTML export continues to traverse owned cards only and includes their existing prose/moniker text. It never expands or duplicates reference branches.
 
 ---
 
@@ -136,6 +163,7 @@ Cards do NOT have titles.
 - If abandoned empty → removed
 - The only card that must never be removed is the final remaining card in the whole tree; deletion of that card clears its content instead.
 - Backspace on an empty card deletes it when at least one other card exists
+- Deleting a card returns selection to the most recently visited card that survives the deletion. Creating a card and deleting it therefore returns to the card the user was on before creation. Visit history lasts only for the current document session; without a surviving visited card, normal spatial deletion fallback applies. Explicit arrow navigation still follows its requested destination when abandoning an empty card.
 - Cards always render fully (no collapsing)
 
 ---
@@ -178,13 +206,13 @@ navigation | editing | search | command
 - From a root card, Left moves to the current `.fable` document context card, then to its containing folder.
 - In folder context, Up/Down moves through visible folders and `.fable` files; Right enters folders or opens `.fable` files; Enter renames selected `.fable` files.
 
-Up/down follows the packed spatial column, even across different parent groups. Left/right changes depth. Moving left remembers the child just left, so moving right retraces the same path across multiple depths. Moving up or down to another card clears this child-selection memory, including when returning to the previous sibling; Right then starts at the first child again. The same memory applies to folders, FABLE files, and the root cards within the open document. Moving Up/Down between explorer entries clears it too; pressing an arrow at a column boundary without changing selection preserves memory. Memory lasts only for the open document session and falls back to the first child if the remembered child was deleted or moved.
+Up/down follows the packed spatial column, even across different parent groups. Left/right changes depth. Reference appearances follow §2.7, including owned-first Right navigation and path-aware Left return. Moving left remembers the child just left, so moving right retraces the same path across multiple depths. Moving up or down to another card clears this child-selection memory, including when returning to the previous sibling; Right then starts at the first child again. The same memory applies to folders, FABLE files, and the root cards within the open document. Moving Up/Down between explorer entries clears it too; pressing an arrow at a column boundary without changing selection preserves memory. Memory lasts only for the open document session and falls back to the first child if the remembered child was deleted or moved.
 
 ### Movement
 
 - Shift+Up / Down → move within the current column, including root cards and across parent groups
 - Shift+Left → outdent
-- Shift+Right → make the active card the last child of the sibling above
+- Shift+Right → make the active card the last child of the sibling above, including at root depth; its descendants move with it. With no sibling above, leave the card unchanged.
 - Option+Up / Down → merge with the sibling above or below while keeping the current card
 
 ### Creation
@@ -197,26 +225,26 @@ Up/down follows the packed spatial column, even across different parent groups. 
 
 ### Clipboard
 
-- In navigation mode on a writing card, Cmd/Ctrl+C copies only the active card's content.
+- In navigation mode on a writing card, Cmd/Ctrl+C copies the active card's content and fixed source identity. Navigation paste copies content; editor paste inserts a card link (§2.6).
 - In navigation mode on a writing card, Cmd/Ctrl+X cuts the active card plus its full descendant subtree and removes that subtree immediately.
 - Cutting the final remaining root card keeps the document valid by clearing that root card and removing its children.
 - In navigation mode, Cmd/Ctrl+V pastes only valid Fablecraft card payloads.
-- Pasting onto an empty leaf writing card fills that card in place.
+- Pasting a valid Fablecraft card payload onto an empty leaf writing card fills that card in place, including while editing a newly created card. A subtree payload fills the active card with its root and recreates descendants beneath it; editing stays active.
 - Pasting onto a writing card that already has content or children creates a new sibling card directly below it and pastes into that new card.
 - Pasting copied content preserves the source card's rich formatting and does not create children.
 - Pasting a cut subtree maps the pasted root onto the in-place or newly created target card and recreates the cut children below it with new card ids.
 - Card clipboard payloads work across `.fable` documents through the system clipboard while each document keeps its own undo history.
 - Folder and `.fable` explorer context cards ignore card clipboard commands.
-- Editing mode keeps normal text cut, copy, and paste behavior inside the active editor.
+- Editing mode keeps normal text cut, copy, and paste behavior inside the active editor. Copied-card payloads insert links (§2.6); cut-subtree payloads pasted into an empty leaf use the structural paste behavior above.
 
 ### Editing
 
 - Type → enter edit mode and insert the typed character
 - Enter → edit mode
 - Escape → navigation mode
-- Escape on an empty child card → delete the empty card and return to its parent in navigation mode
+- Escape on an empty leaf card → delete the empty card and return to the most recently visited surviving card in navigation mode; without visit history, prefer its parent, then the usual spatial fallback
 - Backspace on an empty card → delete card
-- Backspace on an empty child card → delete the empty card and return to its parent in editing mode
+- Backspace on an empty leaf card → delete the empty card and return to the most recently visited surviving card in editing mode; without visit history, prefer its parent, then the usual spatial fallback
 - Backspace from a trailing empty line removes that line immediately and returns to the previous line
 - ArrowDown at the end of a card opens the card below in edit mode at the start of that card
 - ArrowUp at the start of a card opens the card above in edit mode at the end of that card
@@ -245,13 +273,15 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - stage background matches the card surface exactly
 - on macOS, the native traffic-light title bar overlays the app content so it uses the exact same light/dark background as the workspace
 - the top drag region spans the upper 128px of the window so the overlay title area is easy to grab
-- Active card: centered
+- Active card: vertically centered when it fits; horizontally positioned within the responsive column arrangement described below
 - arrow-key navigation recenters the selected card and should not be immediately displaced by residual trackpad pan momentum
 - Parents: left-middle column
 - Children: right column
 - Siblings: above and below the active card
-- The normal writing view shows only the selected card, its ancestor chain, its siblings (cards with the same parent), and its direct children. Children of other cards and deeper descendants stay hidden until selected through navigation. Overview continues to show the whole tree.
-- Cmd/Ctrl+- enters a structural overview state that uses compact, fixed-size title-only card shells at a fixed zoom level
+- Normal writing columns depend on available window width: one = active card and siblings; two = active card and siblings, children; three = immediate parent, active card and siblings, children; four = immediate parent, active card and siblings, children, grandchildren. Ancestors beyond the visible parent column and other branches stay hidden. Overview continues to show the whole tree.
+- The visible columns fill the window with equal card widths, fixed 24px gaps and 24px outer margins. Cards shrink until a 360px minimum reading width is reached, then the layout drops a column. Column transitions occur at 792px, 1176px, and 1560px of available workspace width; four is the maximum. In two/four columns the active card sits left of the window center. Missing tree levels retain their column space so selection does not change width.
+- The desktop window minimum size is 408 × 320 logical pixels. Directory cards retain their existing fixed sizing and arrangement; overview retains its fixed-size graph. The manual card-width setting is removed; legacy saved width preferences are ignored.
+- Wide Lens is the zoomed-out structural overview: compact, fixed-size title-only card shells at a fixed zoom level. Every card has a soft shadow matching the writing-card shadow style, with no outline. The selected card uses the same shadow geometry with greater darkness, complementing the darker selected graph lines. Wide Lens shadows are visible in both light and dark themes. Hide descendant-count badges in Wide Lens, retaining card numbers and reference indicators.
 - overview title shells are wide enough for short titles and may wrap title text across two lines
 - overview breaks away from normal writing-view packing rules so it can show how the tree forks by depth
 - overview draws parent-to-child Bezier connector lines from the right edge of each parent shell to the left edge of each child shell
@@ -262,17 +292,21 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - overview centers child groups around their parent where possible, while keeping adjacent child sibling centers no more than 200px apart
 - overview uses the same fixed zoom level regardless of which card opened it; navigating between cards does not rescale the overview
 - trackpad / wheel gestures do not trigger overview; once overview is open they pan the structural graph without changing the selected card
-- Cmd/Ctrl++, the `Zoomed In` command, and Window > Zoomed In exit overview and return to the normal rich card view centered on the selected card
-- Cmd/Ctrl+-, the `Zoomed Out` command, and Window > Zoomed Out open the whole-tree overview
+- Three view modes are available: **Wide Lens**, **Normal**, and **Focused**. Normal uses the responsive writing columns above. Focused shows the selected full-content card and its same-parent siblings above and below in one horizontally centered column, up to 880px wide with at least 24px side margins. Cards belonging to other parents, ancestors, children, and the empty-child target stay hidden. Root cards count as siblings of one another.
+- Cmd/Ctrl++ (or =) and Window > Zoom In step Wide Lens → Normal → Focused; Cmd/Ctrl+- and Window > Zoom Out step back. Stop at either end. The command palette and Window menu also offer all three named views directly. Enter in Wide Lens returns to Normal in navigation mode.
+- Focused displays subtle, non-interactive chevrons at the top, bottom, left, and right viewport edges only where card navigation has a destination. Up/Down follow packed-column navigation, Left indicates the parent (or document context at the root), and Right indicates the remembered or first child. Use the same light, theme-aware neutral color as the unselected graph lines. Hints stay fixed while the frame pans and are hidden in Normal, Wide Lens, and directory views.
+- Focused retains tree navigation, card editing, autosave, shared-frame panning, long-card top placement and caret reveal. Selecting a different card keeps Focused active. Switching views resets pan and returns to navigation mode, preserving the selected card and child memory; new documents start in Normal. Directory cards retain their existing sizing and arrangement. Normal continues to respect the existing Neighbor Cards preference; Focused shows same-parent siblings independently of that preference.
 - overview may leave distant parts of the tree outside the viewport when the centered structural map is larger than the window
 - returning from overview restores the normal rich-card spacing without temporarily packing long neighboring cards as minimum-height cards
 - overview titles are derived from the first non-empty line of each card's existing content; cards still do not have separate persisted titles
 - clicking a card in overview selects it as the return target without entering text editing
-- unselected cards keep the same text and surface color, but render without visible outline or shadow
+- in Normal and Focused, unselected cards keep the same text and surface color, but render without visible outline or shadow
 - dark theme cards use lighter box surfaces instead of shadows; the selected editing card becomes lighter again
 - dark theme card number labels use a light token so labels such as `A01` remain visible
 - immediate parent aligns vertically with the active card
-- the remembered immediate child (otherwise the first child) is vertically centered on the active card; siblings stack above and below it in order, even when other child groups share that column. Remembered deeper return paths retain their alignment during horizontal navigation
+- in columns anchored by the active card, its ancestors, or remembered descendants, cards belonging to other parents prefer their own parent's top-aligned child slot; preserve tree order and push cards above the anchor upward or cards below it downward only when needed to avoid overlap
+- A valid remembered child controls its group’s visual anchor as well as Right navigation: align it with its parent’s vertical center, clamping its top to the usable top edge when necessary to keep its start visible. Stack earlier/later siblings above/below in tree order; the first child may overflow above. Remembered return paths take priority over group centering.
+- Without a remembered child, center the child group’s complete height (including gaps) on its parent. Clamp its top to the usable top edge if the group would extend above it; excess cards overflow below. A single child follows the same centering rule. Grandchild groups follow these rules, with neighboring groups displaced outward when needed to avoid overlap and preserve order.
 - The underlying spatial layout retains hidden branches for column navigation: first children of other parent groups prefer their parent's top-aligned slot, with later children stacked below, while avoiding the active child group or reserved empty child slot. Visibility filtering does not change tree order or keyboard destinations.
 - anchoring the active child group must not reorder neighboring sibling subtrees in that same child column
 - when the active card has no children, the child column shows no writing cards and retains a full empty child-creation slot centered on the active card
@@ -287,7 +321,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 ### Visibility
 
 - show as much as fits
-- prioritize parent + active card
+- prioritize the active column, then children, then parent context, then grandchildren as the window widens
 - cards may be partially off-screen
 
 ### Card Size
@@ -304,11 +338,11 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - focused cards do not resize just because they are selected
 - focused and unfocused cards keep the same footprint
 - only the currently selected card shows elevated shadow treatment
-- unselected cards have no visible outline or shadow
+- in Normal and Focused, unselected cards have no visible outline or shadow
 - when a selected card is taller than the window, navigation mode keeps the card top and title visible while the body overflows below the viewport
-- pressing Enter to edit an oversized card shifts it so the card bottom is visible with a small viewport buffer and the top overflows above
+- Entering edit mode alone preserves placement. Only manual panning or revealing a caret/selection further down may move the card start above the viewport. Caret movement and typing pan the whole frame only enough to keep the selection head visible; resizing while editing also preserves caret visibility. The usable top/bottom inset is 48px.
 - cards only grow when content adds lines
-- no scrolling
+- no scrolling inside individual cards
 - no nested scroll
 
 ### Mouse
@@ -318,8 +352,8 @@ Up/down follows the packed spatial column, even across different parent groups. 
   - center
   - enter edit mode
   - cursor placed near click
-- trackpad / wheel gestures pan the bounded normal stage and the overview graph without showing scrollbars
-- Cmd/Ctrl+-, `Zoomed Out`, and Window > Zoomed Out open the whole-tree overview; Cmd/Ctrl++, `Zoomed In`, and Window > Zoomed In restore the normal stage
+- trackpad / wheel gestures pan the entire bounded normal stage and the overview graph without showing scrollbars. Manual pan persists until selecting a card by click or keyboard restores its structured arrangement; typing and caret movement only pan as needed to reveal the selection.
+- Cmd/Ctrl+- and Cmd/Ctrl++ step between Wide Lens, Normal, and Focused; wheel/trackpad gestures only pan the current view
 
 ### Animation
 
@@ -376,8 +410,9 @@ Structure:
 
 View:
 
-- Zoomed In
-- Zoomed Out
+- Wide Lens
+- Normal
+- Focused
 
 Integrations:
 
@@ -450,8 +485,9 @@ Import and export should appear together as a grouped block.
 ### Window
 
 - Reload
-- Zoomed In
-- Zoomed Out
+- Wide Lens
+- Normal
+- Focused
 - Minimize
 - Toggle Full Screen
 
@@ -490,7 +526,7 @@ Includes:
 - text size
 - default reading scale should stay slightly compact to preserve card density
 - line height
-- card width
+- automatic card width based on the window (no manual width control)
 - neighbor cards visibility
 - row-based inline controls instead of native selectors
 - keyboard navigation is preserved: Up/Down move between setting rows, Left/Right change the current row
@@ -636,7 +672,7 @@ Rules:
 - no mandatory account for local writing
 - no collaboration
 - no plugins
-- no general card linking (MVP); passage-anchored direct children are supported as defined in §2.5
+- same-document inline card links, derived reference children, and passage-anchored direct children are supported as defined in §2.5–2.7; cross-document links remain outside scope
 - no multi-select
 - no sync in the current MVP
 - no hosted AI connector accounts in the current MVP
@@ -656,7 +692,7 @@ Fablecraft is a:
 Its core innovation is allowing users to move across **levels of abstraction** while maintaining a clean, minimal interface.
 Card identity:
 - Each card shows a human-friendly structural number in the top-right corner.
-- Cards leave the top-left corner free of identifiers. Immediately to the left of the top-right structural number, a small rounded card-shaped outline shows the total descendant count (children, grandchildren, and deeper descendants, excluding the card itself). Leaf cards hide the badge entirely; hidden descendants are included. This identity treatment applies to writing cards and overview cards.
+- Cards leave the top-left corner free of identifiers. Immediately to the left of the top-right structural number, a small rounded card-shaped outline shows the total descendant count (children, grandchildren, and deeper descendants, excluding the card itself). Leaf cards hide the badge entirely; hidden descendants are included. Writing cards show this badge; Wide Lens omits descendant counts while retaining the structural number.
 - The current first-pass numbering model is grid-like by depth: root cards begin at `A01`, their children at `B01`, `B02`, and so on.
 - The numbering is present in workspace cards and search results to make navigation and discussion easier without introducing titles.
 Settings clarity:

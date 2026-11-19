@@ -974,7 +974,7 @@ export function App() {
     },
     {
       id: "open-settings",
-      keywords: ["theme", "font", "width", "line height"],
+      keywords: ["theme", "font", "line height"],
       label: "Settings",
       run: () => {
         openSettingsDialog();
@@ -987,16 +987,22 @@ export function App() {
       run: () => runPaletteAction(() => handleCheckForUpdates({ manual: true })),
     },
     {
-      id: "zoomed-in",
-      keywords: ["zoom", "normal", "writing", "view"],
-      label: "Zoomed In",
-      run: () => runPaletteAction(() => dispatchNativeMenuAction("zoom-in")),
+      id: "view-wide-lens",
+      keywords: ["zoom", "overview", "tree", "graph", "view"],
+      label: "Wide Lens",
+      run: () => runPaletteAction(() => dispatchNativeMenuAction("view-wide-lens")),
     },
     {
-      id: "zoomed-out",
-      keywords: ["zoom", "overview", "tree", "structure", "view"],
-      label: "Zoomed Out",
-      run: () => runPaletteAction(() => dispatchNativeMenuAction("zoom-out")),
+      id: "view-normal",
+      keywords: ["zoom", "writing", "neighbors", "view"],
+      label: "Normal",
+      run: () => runPaletteAction(() => dispatchNativeMenuAction("view-normal")),
+    },
+    {
+      id: "view-focused",
+      keywords: ["zoom", "writing", "document", "distraction", "view"],
+      label: "Focused",
+      run: () => runPaletteAction(() => dispatchNativeMenuAction("view-focused")),
     },
     {
       id: "enable-codex",

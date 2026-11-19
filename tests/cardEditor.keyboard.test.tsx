@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardEditor } from "../src/components/CardEditor";
 import { contentJsonForPlainText, contentText } from "../src/domain/document/content";
 import { NEW_CARD_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
+import { CARD_CLIPBOARD_MIME_TYPE, createCardCopyPayload, encodeCardClipboardPayload } from "../src/domain/document/clipboard";
+import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 import { dispatchNativeMenuAction } from "../src/lib/nativeMenu";
 
 const EMPTY_HEADING_JSON = JSON.stringify({
@@ -74,6 +76,128 @@ describe("CardEditor keyboard behavior", () => {
       }
     ).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
     document.body.innerHTML = "";
+  });
+
+  it("delegates caret reveal to the frame, coalesces selection changes, and rechecks after resize", async () => {
+    const onRevealSelection = vi.fn();
+    const { container, props, root } = renderEditor({ onRevealSelection, selectionViewportKey: "wide" });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    const editor = element.editor;
+    // Let Tiptap's deferred initial focus finish before exercising caret moves.
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    onRevealSelection.mockClear();
+    const coordinates = vi.spyOn(editor.view, "coordsAtPos").mockReturnValue({ top: 900, bottom: 920, left: 0, right: 0 });
+    await act(async () => {
+      editor.view.focus();
+      editor.commands.setTextSelection(3);
+      editor.commands.setTextSelection(5);
+      await new Promise(requestAnimationFrame);
+    });
+    expect(onRevealSelection).toHaveBeenCalledTimes(1);
+    expect(onRevealSelection).toHaveBeenLastCalledWith({ top: 900, bottom: 920, left: 0, right: 0 });
+    expect(coordinates).toHaveBeenLastCalledWith(5);
+    onRevealSelection.mockClear();
+    await act(async () => { root.render(<CardEditor {...props} selectionViewportKey="narrow" />); });
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(onRevealSelection).toHaveBeenCalledTimes(1);
+    expect(editor.state.selection.head).toBe(5);
+    await act(async () => { root.unmount(); });
+  });
+
+  it.each(["#B8", "#B08"])("converts %s only on Space, keeping following text and a trailing space", async (reference) => {
+    const { container, props, root } = renderEditor({
+      cardLabels: { fixed: "B08" }, documentId: "doc-1",
+      contentJson: contentJsonForPlainText(`See ${reference} next`),
+    });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    expect(element.querySelector(".fc-card-link")).toBeNull();
+    await act(async () => {
+      element.editor.commands.setTextSelection(5 + reference.length);
+      element.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    });
+    const json = JSON.stringify(element.editor.getJSON());
+    expect(json).toContain('"targetCardId":"fixed"');
+    expect(contentText(json)).toBe("See B08  next");
+    expect(element.querySelector(".fc-card-link")?.textContent).toBe("B08");
+    expect(element.editor.state.selection.$from.nodeBefore?.text).toBe(" ");
+    await act(async () => { root.unmount(); });
+  });
+
+  it.each([
+    contentJsonForPlainText("#B99"),
+    JSON.stringify({ type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "#B8" }] }] }),
+    JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "#B8", marks: [{ type: "code" }] }] }] }),
+  ])("leaves missing references and code literal", async (contentJson) => {
+    const { container, props, root } = renderEditor({ cardLabels: { fixed: "B08" }, contentJson });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.setTextSelection(element.editor.state.doc.content.size - 1);
+      element.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    });
+    expect(element.querySelector(".fc-card-link")).toBeNull();
+    await act(async () => { root.unmount(); });
+  });
+
+  it.each(["", "Before after"])("pastes a copied card as a reference into an editor containing %j", async (text) => {
+    const onOpenCardLink = vi.fn();
+    const { container, props, root } = renderEditor({
+      cardLabels: { "card-a": "B01" }, documentId: "doc-1", onOpenCardLink,
+      contentJson: contentJsonForPlainText(text),
+    });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    const payload = createCardCopyPayload(makeDocumentSnapshot(), "card-a");
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) =>
+      type === CARD_CLIPBOARD_MIME_TYPE ? "" : type === "text/plain" ? encodeCardClipboardPayload(payload) : "", files: [] } });
+    await act(async () => {
+      element.editor.commands.setTextSelection(text ? 8 : 1);
+      element.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(true);
+    expect(contentText(JSON.stringify(element.editor.getJSON()))).toBe(text ? "Before B01after" : "B01");
+    await act(async () => { (element.querySelector(".fc-card-link") as HTMLElement).click(); });
+    expect(onOpenCardLink).toHaveBeenCalledWith("card-a");
+    await act(async () => { root.render(<CardEditor {...props} cardLabels={{ "card-a": "C03" }} />); });
+    expect(element.querySelector(".fc-card-link")?.textContent).toBe("C03");
+    await act(async () => { root.render(<CardEditor {...props} cardLabels={{}} />); });
+    expect(element.querySelector(".fc-card-link")?.getAttribute("aria-disabled")).toBe("true");
+    onOpenCardLink.mockClear();
+    await act(async () => { (element.querySelector(".fc-card-link") as HTMLElement).click(); });
+    expect(onOpenCardLink).not.toHaveBeenCalled();
+    await act(async () => { root.unmount(); });
+  });
+
+  it("replaces selected text with a chip, supports keyboard activation, and deletes it as one object", async () => {
+    const onOpenCardLink = vi.fn();
+    const { container, props, root } = renderEditor({
+      cardLabels: { "card-a": "B01" }, documentId: "doc-1", onOpenCardLink,
+      contentJson: contentJsonForPlainText("Before replace after"),
+    });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    const payload = createCardCopyPayload(makeDocumentSnapshot(), "card-a");
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { getData: (type: string) =>
+      type === CARD_CLIPBOARD_MIME_TYPE ? JSON.stringify(payload) : "", files: [] } });
+    await act(async () => {
+      element.editor.commands.setTextSelection({ from: 8, to: 15 });
+      element.dispatchEvent(paste);
+    });
+    expect(contentText(JSON.stringify(element.editor.getJSON()))).toBe("Before B01 after");
+    const chip = element.querySelector(".fc-card-link") as HTMLElement;
+    await act(async () => { chip.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
+    expect(onOpenCardLink).toHaveBeenCalledWith("card-a");
+    await act(async () => {
+      element.editor.commands.setTextSelection(9);
+      element.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+    });
+    expect(element.querySelector(".fc-card-link")).toBeNull();
+    expect(contentText(JSON.stringify(element.editor.getJSON()))).toBe("Before  after");
+    await act(async () => { root.unmount(); });
   });
 
   it.each(["shortcut", "tab", "native-menu"])("creates an anchored selection through %s without separately saving the source mark", async (trigger) => {

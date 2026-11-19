@@ -282,16 +282,16 @@ animation: ~140ms ease-in-out
 - typing any printable character enters edit mode and forwards that character into the editor
 - Tab+ArrowUp / Down / Right / Left create siblings, last children, and wrapped parents in both navigation and editing modes
 - Shift+Up / Down moves within the packed column, can reorder root cards, and may reparent a card when crossing into a neighboring parent group
-- Shift+Right indents the active card under the sibling above as its last child
+- Shift+Right indents the active card under the sibling above as its last child, including root cards (`parentId = null`). `indentCardUnderPreviousSibling` only guards missing cards and the absence of a previous sibling; it preserves descendants and content, reindexes both sibling groups, and uses the existing navigation undo/redo path.
 - Option+Up / Down merges the active card with the sibling above or below while preserving the active card id
-- Cmd/Ctrl+C in navigation mode copies only the active writing card's content and does not create a document history entry
+- Cmd/Ctrl+C in navigation mode copies the active writing card's content and fixed source identity without a history entry. Navigation paste copies content; editor paste inserts a same-document reference.
 - Cmd/Ctrl+X in navigation mode serializes the active writing card plus descendants, removes that subtree immediately, and records one navigation history entry
 - cutting the final remaining root card clears the root and removes descendants instead of deleting the final card
 - Cmd/Ctrl+V in navigation mode pastes only valid Fablecraft card clipboard payloads, replacing an empty leaf writing card in place or creating a new sibling directly below an occupied or structural writing card
 - copied payloads preserve the source card's rich editor JSON instead of falling back to plain-text clipboard insertion
 - pasted subtrees map the payload root onto the in-place or newly created target card, recreate descendants with fresh ids, and set all pasted card `documentId` values to the active document
 - card clipboard payloads can be pasted across `.fable` documents, with undo/redo remaining local to each document's history
-- card clipboard commands do not mutate folder or `.fable` explorer context cards, and editing mode preserves normal text clipboard behavior
+- card clipboard commands do not mutate folder or `.fable` explorer context cards. The workspace capture-phase paste handler also accepts cut-subtree Fablecraft payloads in editing mode when the current store snapshot confirms the active card is an empty leaf. It prevents default insertion and stops propagation to the text editor, reuses structural paste and records one undoable change in the current mode’s history, preserves editing mode, and places the caret at the end of the pasted root. Ordinary text paste retains normal editor clipboard behavior; copied-card paste inserts an inline reference even in occupied editors.
 - no invalid moves
 - empty cards cannot spawn new cards
 - newly created cards use a single empty paragraph: `NEW_CARD_EDITOR_DOCUMENT_JSON` aliases `EMPTY_EDITOR_DOCUMENT_JSON` for frontend sibling/child/parent creation, and the Rust repository and MCP creation tools use the same paragraph structure; heading formatting is applied through Markdown input rules rather than card generation
@@ -315,7 +315,7 @@ animation: ~140ms ease-in-out
 - split works
 
 ### Layout
-- active card centered
+- normal writing cards use responsive columns and viewport-aware vertical placement; overview keeps its existing centered graph
 - active-card/document recentering temporarily suppresses wheel panning so trackpad momentum cannot immediately push an arrow-selected card off center
 - workspace stage fills the available window instead of clipping to an internal max width
 - workspace background matches the card surface rather than using a separate tint
@@ -327,16 +327,17 @@ animation: ~140ms ease-in-out
 - measured card height uses the full rendered card surface so edit mode does not change wrapping or sibling spacing
 - The active shell's `minHeight` uses only `uiMetrics.cardHeight`, never the cached or estimated `card.height`. Cached/estimated heights position the spatial layout; the unconstrained full shell supplies actual measurements through `ResizeObserver` as content grows or shrinks. Feeding the cached height back into the measured shell's minimum creates a non-shrinking sizing loop and traps overestimates or pre-split heights as empty space.
 - the active card keeps the same renderer footprint between navigation and editing
-- oversized active cards use viewport-aware vertical positioning: navigation pins the card top inside the viewport, while editing pins the card bottom inside the viewport with buffer
+- oversized active cards start at the 48px usable top inset in navigation and editing. Entering editing does not pin the bottom; `CardEditor` delegates ProseMirror selection scrolling to the workspace, which pans the shared frame minimally to reveal the selection head. Resize/font changes recheck caret visibility. Default edit focus preserves the existing selection; explicit cross-card start/end placements remain supported.
 - increased internal card padding still preserves the same active vs inactive footprint
 - focused and unfocused cards keep the same footprint
-- unselected cards render without visible outlines or shadows
+- Normal/Focused unselected cards render without visible outlines or shadows
 - navigation focus uses the same elevated shadow as the selected editing card
 - dark theme card shadows are disabled; card visibility comes from lighter card-surface tokens, with an even lighter editing surface
 - card number labels use a theme token with a lighter dark-mode value
-- Normal writing view filters the rendered stage cards to `isNeighborhood` (active card, immediate parent, same-parent siblings, direct children) plus `ancestorsOfCard`. Other branches and deeper descendants remain in the full layout and keyboard navigation model but do not render. Overview renders every card; the hidden-neighbor preference still renders only the active card. Visible preview cards keep full text contrast without shadow treatment.
+- Normal writing view filters `isNeighborhood` and ancestor context to the responsive visible depth range, adding grandchildren in four-column mode. Other branches remain in the full layout and keyboard navigation model. Wide Lens renders the whole projected tree; Focused renders only the active appearance and same-parent siblings. The hidden-neighbor preference applies only to Normal. Visible rich preview cards keep full text contrast without shadow treatment.
 - immediate parent aligns with the active card
-- normal `stageLayout` receives the remembered child map and aligns the remembered immediate child (otherwise the first) with the active card centerline, stacking siblings above/below in tree order without overlap; remembered deeper return paths stay aligned as well
+- `repackColumnAroundAnchor` recalculates top-aligned child targets from current parent positions for cards outside the anchor's sibling group, clamping upward before the anchor and downward after it to preserve spacing and tree order; the immediate child/empty-slot pass also recomputes these targets instead of reusing displaced intermediate centers
+- `stageLayout` retains the full tree navigation layout and remembered-child map. `writingLayout.ts` refines normal visible placement without changing keyboard destinations: center a child group by its full measured height when no valid memory exists; otherwise anchor the remembered child on the parent centerline. Clamp group/remembered-card top to the usable viewport top. Remembered siblings may overflow above; unremembered groups overflow below. Grandchild groups preserve order and pack outward around the preferred return branch to avoid overlap.
 - non-active first children in the active child column prefer their own parent's visible top-aligned child slot and are displaced only far enough to avoid the active child group or reserved empty child slot, with later siblings stacked directly below them
 - the active child-group anchor must preserve the top-to-bottom order of neighboring sibling subtrees in that column
 - when the active card has no children, the child column still reserves a centered empty slot with the active card's measured footprint before sibling child groups above and below are packed
@@ -344,17 +345,28 @@ animation: ~140ms ease-in-out
 - no nested scroll
 - no scrollbars
 - wheel / trackpad panning moves the normal writing stage
-- Cmd/Ctrl+- enters overview, renders every card as a compact first-line title with up to two visible lines, starts with the active card centered, and uses the fixed overview scale defined in `DocumentWorkspace`
+- Wide Lens renders every card as a compact first-line title with up to two visible lines, starts with the active card centered, and uses the fixed overview scale defined in `DocumentWorkspace`. `TreeCardButton` title-only shells use theme-specific `--fc-shadow-overview-card` / `--fc-shadow-overview-card-active` tokens instead of outlines. Both use the writing-card 0/12px/28px shadow geometry, with selected alpha increased (light: .08 → .18; dark: .24 → .48); selection changes darkness without changing the layout footprint. Normal and Focused retain their existing shadow behavior. Title-only identity rows omit descendant counts while retaining card numbers and reference indicators.
 - overview uses `overviewTreeLayout` rather than normal `stageLayout`; cards have fixed dimensions, columns follow tree depth, parent/child columns have extra horizontal space, and parent-to-child Bezier connector paths render behind the cards
 - overview connector strokes use warm gray theme tokens, with the selected card's descendant subtree edges and ancestor-path edges using the darker active connector token
 - overview always uses the same fixed scale no matter which card opened it; card navigation inside overview must not recalculate scale, and wheel / trackpad gestures pan the overview graph without changing focus
 - overview centers child groups around their parent where possible and caps adjacent child sibling center gaps at 200px
 - wheel / trackpad gestures pan the normal stage or overview graph depending on the current mode; they must not enter or exit overview
-- Cmd/Ctrl++, the `Zoomed In` command, and the native Window > Zoomed In menu action exit overview and restore the normal rich-card stage around the selected card
-- Cmd/Ctrl+-, the `Zoomed Out` command, and the native Window > Zoomed Out menu action enter overview
+- `DocumentWorkspace.viewMode` is transient `wide-lens | normal | focused`, reset to Normal on document change. Zoom In / Cmd/Ctrl++ or = and Zoom Out / Cmd/Ctrl+- step through that ordered sequence and clamp at its endpoints. The native Window menu and palette dispatch direct `view-wide-lens`, `view-normal`, and `view-focused` actions. Enter in Wide Lens selects Normal. View changes retain selection/child memory, reset shared pan and pending editor input, and return to navigation mode.
+- Focused calls `writingViewport` with its focus flag: one horizontally centered column, width capped at `writingLayoutTokens.focusedCardWidth` (880px), at least the existing 24px side margins. Render the active appearance plus cards whose projected `parentId` matches the active appearance’s parent, including other roots when the active parent is null. Keep existing measured-height stacking above/below the selection. Hide other parent groups even when they share the same depth, and omit the empty-child target; retain the complete navigation tree for arrow navigation and structural edits. Focused sibling visibility overrides the Neighbor Cards preference; that preference continues to govern Normal. Directory metrics and overview dimensions remain unchanged. Normal continues to honor the legacy Neighbor Cards preference.
+- Focused navigation hints derive availability from the same `previousCardInColumn`, `nextCardInColumn`, `parentCardId` (including the root-to-document fallback), and `preferredChildCardId` helpers as keyboard navigation, using projected appearance ids and child memory. Render pointer-transparent, aria-hidden SVG chevrons in a viewport-fixed stage overlay, only for writing selections in Focused. Reuse `--fc-color-overview-connector`; centralize size (24px), edge inset (16px), top inset (48px), and stroke width (2) under `uiTokens.focusedNavigation`. These indicators introduce no new navigation actions or focus targets.
+- Include `viewMode` in keyboard/menu listener dependencies so Normal ↔ Focused transitions cannot leave stale zoom handlers. Width changes invalidate height measurements and trigger the existing caret-visibility checks; long cards retain viewport-top placement in both rich views.
 - exiting overview after selecting a different card must remeasure the newly active full-size card before relying on its height for sibling spacing
 - normal rich-card layout must use content-based height estimates for cards whose DOM measurements are not available yet, so long cards are never packed using the minimum card height after returning from overview
 - card height measurement must use transform-independent layout dimensions (`offsetHeight` / `scrollHeight`), not transformed bounding boxes, because overview scale transitions can otherwise cache undersized heights and collapse normal spacing
+
+### Responsive writing acceptance
+
+- `writingLayoutTokens` centralizes 360px minimum card width, 24px outer margins/gaps, 48px vertical inset, and a maximum of four columns. `writingViewport` derives equal widths and the active-column offset from the actual stage width. Breakpoints are 792 / 1176 / 1560 logical pixels. One/two columns put active at index 0; three/four put active at index 1. Empty levels retain their allotted space.
+- `DocumentWorkspace` observes stage dimensions with `ResizeObserver` and a window-resize fallback. Its local `--fc-card-width` controls writing shells/previews/empty-child targets; measurements are invalidated on width and typography changes. Directory metrics remain fixed at the existing 468px base (234px explorer cards); overview dimensions do not change.
+- Filter visible writing columns by depth while retaining full layout cards for navigation. The fourth column includes the active children’s children. Panning applies one shared offset after structured layout; card selection resets it, while entering editing alone does not. Cards and child groups keep their start within the usable top edge unless an earlier sibling of a remembered anchor must overflow above, or the user pans/reveals a selection.
+- Native window config sets `minWidth: 408`, `minHeight: 320`. Browser embeds may be narrower and still use one column.
+- Verify all three direct view actions and stepwise keyboard/native zoom in both directions, endpoint clamping, selected-card/memory retention, focused navigation and resizing, focused long-card editing, Normal layout restoration, and Wide Lens shadow/badge rendering.
+- Verify breakpoint boundaries, equal widths/constant gaps, long active cards in both modes, uneven child-group centering and overflow, remembered late/tall children, grandchild non-overlap, free pan/reselection, caret reveal and resizing, six-row settings keyboard wrap, and legacy preference migration. Directory and overview behavior remain covered by existing checks.
 
 ### Single-plane model
 - the desktop editor exposes no layer UI or layer model
@@ -392,20 +404,20 @@ animation: ~140ms ease-in-out
 - native Card actions reuse the same structural operations as keyboard shortcuts
 - native Tools includes Enable Codex and Enable Claude Desktop alongside palette and search
 - native Fablecraft menu includes Check for Updates
-- native Window includes Reload, Zoomed In, Zoomed Out, Minimize, and Toggle Full Screen
+- native Window includes Reload, Zoom In, Zoom Out, direct Wide Lens / Normal / Focused choices, Minimize, and Toggle Full Screen
 - the palette shows at most five filtered results and stays input-focused until dismissed
 - the palette input opts out of spellcheck, autocorrect, autocomplete, and autocapitalization so WebKit text-assistance popovers do not cover command results
 - Show Command List, Settings, Enable Codex, and Enable Claude Desktop are the leading default commands
 - the command palette exposes Open Recent; the action opens a focused overlay backed by the same capped five-path local history as startup
 - the command palette exposes Check for Updates
-- the command palette exposes Zoomed In and Zoomed Out, reusing the same actions as the native Window menu and zoom keyboard shortcuts
+- the command palette exposes Wide Lens, Normal, and Focused as direct view choices; shared native-menu action types carry those choices to the workspace. Help lists the three modes and stepwise zoom shortcuts.
 - the help sheet lists both Show Command List and Show Shortcuts
 - the help sheet includes the merge shortcuts and merge command labels
 - the command palette exposes Merge with Above and Merge Below when the active card has sibling targets
 - the command palette exposes Convert Card to Document when a real card is selected; it uses the same save dialog path as document creation, builds a new snapshot from the selected subtree with the target document id, saves the target by explicit path, saves the source document by explicit path after removing the subtree, and opens the new document
 - integration setup commands show a tick when the local config already contains the Fablecraft MCP entry
 - Cmd/Ctrl+F opens centered search over the document
-- settings labels clearly distinguish theme, text size, line height, and card width
+- settings labels clearly distinguish theme, text size, and line height; remove the manual width row, setter, and persisted preference, ignoring legacy width values
 - settings include a neighbor-card visibility preference; hidden mode suppresses non-active normal workspace card shells while preserving keyboard navigation and overview rendering
 - settings overlays stay within the viewport and scroll internally when content is tall
 - settings update token-backed UI immediately and persist locally
@@ -447,7 +459,7 @@ animation: ~140ms ease-in-out
 - the desktop app checks the same signed updater manifest shortly after startup and through manual Check for Updates actions
 - `.env.example` documents the required website env vars for Vercel or other static hosting
 - maintainers publish a new website-backed macOS download by pushing a `v*` tag that matches the desktop version and letting the GitHub Actions workflow attach the renamed DMG asset to the release
-- Release `v0.4.0` keeps the version synchronized across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; user-facing changes are recorded in `docs/releases/v0.4.0.md`.
+- Release `v0.5.0` keeps the version synchronized across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; user-facing changes are recorded in `docs/releases/v0.5.0.md`.
 - CI's macOS check and the Apple Silicon release job run on GitHub's `macos-15` runner. The retired `macos-14` label must not be used: scheduled retirement brownouts prevent jobs from starting, including the signing/notarization release job.
 - website runtime detection must not invoke desktop updater behavior in browser builds
 
@@ -485,7 +497,7 @@ animation: ~140ms ease-in-out
 Card numbering:
 - Card numbering is derived at runtime from document structure, not stored in SQLite.
 - The current implementation assigns labels by depth and visual order using a depth letter plus two-digit sequence, for example `A01`, `B01`, `B02`.
-- `CardIdentity` renders the top-right structural label with a small rounded outline badge immediately to its left; parent identifiers are no longer rendered. `buildDescendantCountMap` computes total descendants for every card in linear time over the full snapshot tree, excluding the card itself and including hidden descendants. Counts are derived at runtime and update with tree edits, undo/redo, and snapshot hydration; leaves hide the badge. Active, preview, and overview writing cards share this identity component and the existing theme-aware label color. Badge geometry, spacing, placement, and overview title clearance use centralized UI tokens.
+- `CardIdentity` renders the top-right structural label with a small rounded outline badge immediately to its left; parent identifiers are no longer rendered. `buildDescendantCountMap` computes total descendants for every card in linear time over the full snapshot tree, excluding the card itself and including hidden descendants. Counts are derived at runtime and update with tree edits, undo/redo, and snapshot hydration; leaves hide the badge. Active, preview, and overview writing cards share this identity component and the existing theme-aware label color; title-only overview cards omit the descendant badge. Badge geometry, spacing, placement, and overview title clearance use centralized UI tokens.
 - Search results must display the derived card label alongside matched content.
 Settings presentation:
 - Settings rows should expose row-level keyboard focus visually with a leading chevron-style cue.
@@ -511,7 +523,8 @@ Tree editing:
 - The editor placeholder string is `Your story starts here` for the first root card only; later root cards and non-root cards should render without editing placeholder copy.
 - Empty non-first cards should render a muted italic `empty card` placeholder in navigation and preview surfaces after editing is abandoned with no content. This placeholder must not be persisted into card content and must disappear when editing resumes and the user types.
 - Escape and in-editor card-to-card arrow navigation should abandon an empty leaf card by deleting it before changing mode or focus, including at root depth, unless it is the only card in the document.
-- When Backspace or Escape abandons an empty child leaf card from editing mode, focus should return to the deleted card's parent instead of the nearest spatial sibling.
+- `interactionStore.previousCardIds` tracks distinct previous active writing-card ids in recency order; selecting the same card is a no-op. The workspace clears this transient history on document changes; it is excluded from snapshots, autosave, and undo history.
+- Normal deletion and Backspace/Escape empty-leaf abandonment prefer the most recently visited surviving card, skipping missing cards and the deleted subtree. With no surviving visit, empty-leaf abandonment prefers the parent and normal deletion uses its existing spatial fallback. Explicit arrow navigation continues to use its requested destination. Creating and then deleting a card returns to its source card, including sibling creation above or below.
 - Empty-card deletion should allow removing a root-level card whenever any other card exists in the tree. The final remaining card in the whole tree is protected from removal, and navigation-mode deletion should clear its content instead.
 - `CardEditor` should suppress `Escape`-to-navigation on the final remaining empty card so startup editing does not strand the user in navigation mode.
 
@@ -525,3 +538,28 @@ Tree editing:
 - macOS first uses `NSFileManager.trashItemAtURL`. On failure, `document_trash.rs` logs `[document_trash_fallback]` and retries via the `trash` crate's explicit `DeleteMethod::Finder`. This can require macOS Automation consent, including for the launching terminal during development. Success from either method permits state cleanup; if both fail, the error retains both diagnostics and no state cleanup occurs. Neither path uses permanent deletion. Recovery remains possible by moving the file out of Trash.
 - The opt-in native smoke test `cargo test --manifest-path src-tauri/Cargo.toml native_trash_moves_disposable_file -- --ignored` creates a uniquely named disposable `.fable` in the temporary directory and moves it to the real system Trash. Normal tests skip this OS-integrating check.
 - `src-tauri/Info.plist` supplies the Finder Automation usage description; `src-tauri/Entitlements.plist`, referenced by `bundle.macOS.entitlements`, enables Apple Events consent for hardened macOS bundles. These declarations support the Trash fallback and do not grant consent automatically.
+
+
+### Inline card references
+
+- `cardLinks.ts` resolves padded/unpadded structural monikers and maps reference ids during structural clipboard paste. `cardNumbers.ts` derives display labels from the current tree; labels are never reference identity.
+- `CardLinkNode` is an atomic inline TipTap node persisted in existing rich-content JSON as `{ type: "cardLink", attrs: { targetCardId, label } }`. No SQLite migration or new parent/child relationship is introduced. Snapshot normalization refreshes the label fallback while preserving missing target ids for undo restoration.
+- `CardEditor` converts a valid standalone `#B8`/`#B08` token on unmodified Space in prose, inserting the chip and trailing space in a single editor transaction. No completion UI is involved. Fixed ids and current labels are passed through ref-backed extension callbacks so input/paste/click handlers see current data without rebuilding the editor.
+- The workspace lets same-document copied-card paste reach the editor, rejects copied-card links to other documents or missing targets, and retains existing structural cut paste. The node extension consumes both custom MIME and encoded plain-text clipboard payloads and replaces the current selection with a chip.
+- Editor node views and `CardContentPreview` display current labels, disable missing targets, and support click and keyboard activation. The workspace opens references in navigation mode through existing active-card centering. Geometry, spacing, typography and colors use centralized UI tokens.
+- Chip-only content is nonempty in domain and editor checks. Rich split paths retain references. Snapshot/history persistence keeps the fixed id; subtree clipboard mapping remaps internal references, preserves same-document external references, and turns cross-document external references into text. Text extraction, search, Markdown/HTML export and MCP plain-text extraction retain the label fallback.
+- Acceptance: both typed forms plus Space; unknown labels and code remain literal; custom-MIME and encoded-text card paste into empty/occupied editors; caret and selection replacement; exact-id navigation after reorder/reparent; missing-target disablement and undo restoration; link deletion without target deletion; subtree remapping; snapshot round trip and existing history undo/redo.
+- `HelpSheet` lists typed-reference and mode-dependent copy/paste shortcuts.
+- Cross-document linking, hover previews, and suggestions are intentionally outside this feature; derived reference children follow the section below.
+
+
+### Reference-child traversal
+
+- `src/domain/document/references.ts` derives a transient `CardRecord` layout tree from the owned snapshot plus deduplicated inline target ids. It never writes synthetic cards into snapshots, SQLite, history, descendant counts, MCP or exports. First-mention order determines alias order above owned children; links to canonical ancestors are excluded.
+- `AppearanceStep` records fixed `cardId` plus whether each edge is an alias. Canonical appearances keep their normal id; reference appearances use a path-derived synthetic identity. Separate appearance ids distinguish an owned child from an alias targeting that same child, and distinguish repeated visits to one fixed id in a cycle.
+- `referenceTree` projects the whole canonical tree plus reference entries. It expands noncanonical branches only along the selected path and through its next child level. This avoids exponential materialization of dense graphs while allowing arbitrarily deep traversal subject to the two-occurrences-per-fixed-id rule. A third occurrence is omitted, not rendered as another card. Missing targets remain terminal appearances.
+- `interactionStore.referencePath` is session-only. `setActiveAppearance` selects a path while retaining the fixed `activeCardId` for existing app actions; explicit `setActiveCardId` clears a reference path even when the fixed id stays the same. Workspace reconciliation returns an invalid path to its nearest surviving prefix and resets path state on a document change.
+- `DocumentWorkspace` passes projected cards and occurrence-specific preferred children into existing normal/overview spatial helpers. Preferred children select the first owned child, falling back to the first alias, for linked sources and reference branches. The remaining canonical branches retain normal child memory. Layout, column navigation, centering, React keys, and parent return use appearance ids; content, labels, owned counts, editing and mutations use fixed ids.
+- Reference appearances use `TreeCardButton` and `CardIdentity` with a token-sized chain-link icon. Enter/type, active-card click and double-click canonicalize before opening an editor. References and inherited descendants are never edited in place. Missing appearances display `?`, a deleted placeholder, and no editing/child actions. Tall active reference cards use the existing viewport-top anchoring treatment.
+- Keyboard and native-menu structural actions canonicalize reference paths before applying ordinary domain mutations. Direct aliases reject Delete/Backspace, cut, Shift+arrows and reorder actions; inherited owned descendants remain mutable at their real location. Clipboard interception respects overlay suspension and explorer mode. Copy preserves the underlying source id; structural paste redirects to the original.
+- Tests cover deduplication/order and preferred-child geometry; ancestor suppression; alias-vs-owned identities; recursive paths and self-links; missing-target retention; source/inline removal reconciliation; bounded dense graphs; unchanged snapshot/count/export semantics; real workspace traversal and canonical editing; keyboard/menu creation; blocked alias mutation/cut; and undo restoration.

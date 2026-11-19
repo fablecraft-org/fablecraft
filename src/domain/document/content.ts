@@ -27,6 +27,8 @@ function collectText(node: EditorNode | null): string {
     return (node.content ?? []).map((child) => collectText(child)).join("\n\n");
   }
 
+  if (node.type === "cardLink") return String(node.attrs?.label ?? "Missing card");
+
   if (node.type === "hardBreak") {
     return "\n";
   }

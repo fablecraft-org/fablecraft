@@ -20,7 +20,7 @@ function formatCardIndex(index: number) {
   return String(index).padStart(2, "0");
 }
 
-export function buildCardNumberMap(snapshot: DocumentSnapshot) {
+export function buildCardNumberMap(snapshot: Pick<DocumentSnapshot, "cards">) {
   const cardNumbers: Record<string, string> = {};
   const depthCounts = new Map<number, number>();
 

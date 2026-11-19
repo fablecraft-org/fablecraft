@@ -738,7 +738,9 @@ describe("App native menu handling", () => {
     });
   });
 
-  it("exposes zoom commands from the command palette", async () => {
+  it.each([
+    ["Wide Lens", "view-wide-lens"], ["Normal", "view-normal"], ["Focused", "view-focused"],
+  ] as const)("selects %s directly from the command palette", async (label, action) => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -782,18 +784,19 @@ describe("App native menu handling", () => {
       commandInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    expect(container.textContent).toContain("Zoomed In");
-    expect(container.textContent).toContain("Zoomed Out");
+    expect(container.textContent).toContain("Normal");
+    expect(container.textContent).toContain("Wide Lens");
+    expect(container.textContent).toContain("Focused");
 
     const zoomedOutCommand = Array.from(container.querySelectorAll("button")).find((node) =>
-      node.textContent?.includes("Zoomed Out"),
+      node.textContent?.includes(label),
     ) as HTMLButtonElement;
 
     await act(async () => {
       zoomedOutCommand.click();
     });
 
-    expect(frontendActions).toContain("zoom-out");
+    expect(frontendActions).toContain(action);
     expect(useAppStore.getState().mode).toBe("navigation");
 
     window.removeEventListener(FRONTEND_MENU_ACTION_EVENT, handleFrontendAction);

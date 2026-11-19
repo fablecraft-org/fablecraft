@@ -310,6 +310,8 @@ function escapeHtml(text: string) {
 function inlineMarkdownFromNodes(nodes: EditorNode[] = []): string {
   return nodes
     .map((node) => {
+      if (node.type === "cardLink") return String(node.attrs?.label ?? "Missing card");
+
       if (node.type === "text") {
         const baseText = node.text ?? "";
 
@@ -391,6 +393,8 @@ function markdownFromChildren(nodes: EditorNode[] = []) {
 function inlineHtmlFromNodes(nodes: EditorNode[] = []): string {
   return nodes
     .map((node) => {
+      if (node.type === "cardLink") return escapeHtml(String(node.attrs?.label ?? "Missing card"));
+
       if (node.type === "text") {
         const baseText = escapeHtml(node.text ?? "");
 

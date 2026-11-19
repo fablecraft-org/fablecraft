@@ -390,7 +390,7 @@ export function indentCardUnderPreviousSibling(
 ) {
   const card = snapshot.cards.find((candidate) => candidate.id === cardId);
 
-  if (!card || !card.parentId) {
+  if (!card) {
     return normalizeDocumentSnapshot(snapshot);
   }
 

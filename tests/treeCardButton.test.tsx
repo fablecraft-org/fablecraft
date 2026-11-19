@@ -326,12 +326,37 @@ describe("TreeCardButton", () => {
     ) as HTMLParagraphElement | undefined;
     expect(titleParagraph?.className).toContain("overflow-hidden");
     expect(titleParagraph?.className).toContain("fc-overview-card-title");
-    expect(container.querySelector(".fc-descendant-count")?.textContent).toBe("12");
+    expect(container.querySelector(".fc-descendant-count")).toBeNull();
+    expect((container.firstElementChild as HTMLElement).style.boxShadow).toBe("var(--fc-shadow-overview-card)");
     expect(titleParagraph?.className).not.toContain("truncate");
 
     act(() => {
       root.unmount();
     });
+  });
+
+  it("gives every Wide Lens card a shadow and darkens the selection without changing its footprint", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const props = { borderColor: "transparent", cardLabel: "A01", descendantCount: 4,
+      contentJson: '{"type":"doc","content":[{"type":"paragraph"}]}',
+      titleOnly: true, cardWidth: 236, minHeight: 72, x: 0, y: 0, onClick: () => {} };
+    act(() => { root.render(<TreeCardButton {...props} />); });
+    const card = container.firstElementChild as HTMLElement;
+    expect(card.style.boxShadow).toBe("var(--fc-shadow-overview-card)");
+    expect(card.style.outline).toBe("");
+    expect(card.querySelector(".fc-descendant-count")).toBeNull();
+    act(() => { root.render(<TreeCardButton {...props} isActive />); });
+    expect(card.style.boxShadow).toBe("var(--fc-shadow-overview-card-active)");
+    expect(card.style.outline).toBe("");
+    expect(card.style.width).toBe("236px");
+    expect(card.style.minHeight).toBe("72px");
+    act(() => { root.render(<TreeCardButton {...props} titleOnly={false} />); });
+    expect(card.style.outline).toBe("");
+    expect(card.querySelector(".fc-descendant-count")?.textContent).toBe("4");
+    expect(card.style.boxShadow).toBe("none");
+    act(() => { root.unmount(); });
   });
 
   it("keeps only the active card visually elevated", () => {

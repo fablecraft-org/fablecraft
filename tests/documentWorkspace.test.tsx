@@ -63,6 +63,7 @@ vi.mock("../src/components/CardEditor", () => ({
     onNavigateChild,
     placeholder,
     pendingTextInput,
+    onRevealSelection,
   }: {
     focusPlacement?: string | null;
     isEditing: boolean;
@@ -76,6 +77,7 @@ vi.mock("../src/components/CardEditor", () => ({
     onNavigateChild?: (placement?: "start" | "end") => boolean;
     placeholder?: string;
     pendingTextInput?: string | null;
+    onRevealSelection?: (bounds: { top: number; bottom: number }) => void;
   }) => (
     <div>
       <div
@@ -85,6 +87,7 @@ vi.mock("../src/components/CardEditor", () => ({
         data-pending-text-input={pendingTextInput ?? ""}
         data-testid="card-editor"
       />
+      <button data-testid="reveal-selection" onClick={(event) => { event.stopPropagation(); onRevealSelection?.({ top: 1000, bottom: 1020 }); }} type="button" />
       <button data-testid="card-editor-create-sibling-above" onClick={() => onCreateSiblingAbove?.()} type="button" />
       <button data-testid="card-editor-create-child" onClick={() => onCreateChild?.()} type="button" />
       <button data-testid="create-anchored-child" onClick={() => onCreateAnchoredChild?.((childCardId) => JSON.stringify({
@@ -212,6 +215,7 @@ function resetStores() {
   });
   useInteractionStore.setState({
     activeCardId: null,
+    previousCardIds: [],
     rememberedChildIds: {},
   });
   useSettingsStore.getState().resetPreferences();
@@ -246,9 +250,11 @@ describe("DocumentWorkspace", () => {
     "scrollHeight",
   );
   const originalInnerHeight = window.innerHeight;
+  const originalInnerWidth = window.innerWidth;
   const originalResizeObserver = globalThis.ResizeObserver;
 
   beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     (
       globalThis as typeof globalThis & {
         IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -307,6 +313,7 @@ describe("DocumentWorkspace", () => {
       configurable: true,
       value: originalInnerHeight,
     });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
     document.body.innerHTML = "";
     resetStores();
   });
@@ -568,7 +575,7 @@ describe("DocumentWorkspace", () => {
     container.remove();
   });
 
-  it("shows only ancestors, same-parent siblings, and direct children, updating on selection", async () => {
+  it("shows the immediate parent, same-parent siblings, and direct children in three columns", async () => {
     const snapshot = makeDocumentSnapshot();
     snapshot.cards.push(
       { ...snapshot.cards[0]!, id: "other-root", orderIndex: 1 },
@@ -597,13 +604,79 @@ describe("DocumentWorkspace", () => {
     expect(labels()).toEqual(["A01", "B01", "C02"]);
     expect(container.querySelector('[data-testid="active-card-shell"] .fc-descendant-count')?.textContent).toBe("1");
     await act(async () => { useInteractionStore.getState().setActiveCardId("a-child"); });
-    expect(labels()).toEqual(["A01", "B01", "D01"]);
+    expect(labels()).toEqual(["B01", "D01"]);
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "-", metaKey: true }));
     });
     expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(7);
     await act(async () => { root.unmount(); });
     container.remove();
+  });
+
+  it("switches visible writing depths and equal widths as the window resizes", async () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      { ...snapshot.cards[1]!, id: "child", parentId: "card-a" },
+      { ...snapshot.cards[1]!, id: "grandchild", parentId: "child" },
+    );
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-a");
+    useAppStore.setState({ mode: "navigation" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    for (const [width, columns, labels] of [
+      [408, 1, ["B02"]],
+      [792, 2, ["B02", "C01"]],
+      [1176, 3, ["A01", "B02", "C01"]],
+      [1560, 4, ["A01", "B02", "C01", "D01"]],
+    ] as const) {
+      await act(async () => {
+        Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+        window.dispatchEvent(new Event("resize"));
+      });
+      const stage = container.querySelector('[data-testid="document-stage"]') as HTMLElement;
+      expect(stage.dataset.columns).toBe(String(columns));
+      expect(stage.style.getPropertyValue("--fc-card-width")).toBe("360px");
+      expect(Array.from(container.querySelectorAll<HTMLElement>('[data-testid="tree-card"]'))
+        .map((card) => card.dataset.cardLabel).sort()).toEqual(labels);
+      expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    }
+    await act(async () => { root.unmount(); });
+  });
+
+  it("reveals the caret by panning the entire frame and restores placement on card selection", async () => {
+    const snapshot = makeDocumentSnapshot();
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    useAppStore.setState({ mode: "editing" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    const shell = container.querySelector('[data-testid="active-card-shell"]') as HTMLElement;
+    const childY = () => Number(container.querySelector<HTMLElement>('[data-testid="tree-card"]')!.dataset.y);
+    const originalChildY = childY();
+    await act(async () => { (container.querySelector('[data-testid="reveal-selection"]') as HTMLElement).click(); });
+    const delta = window.innerHeight - 48 - 1020;
+    expect(childY()).toBe(originalChildY + delta);
+    expect(shell.style.top).toBe(`calc(50% + ${delta}px)`);
+    await act(async () => { shell.click(); });
+    expect(shell.style.top).toBe(`calc(50% + ${delta}px)`);
+    await act(async () => { useAppStore.getState().setMode("navigation"); });
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+    });
+    expect(shell.style.top).toBe(`calc(50% + ${delta}px)`);
+    expect(container.querySelector<HTMLElement>('[data-testid="card-editor"]')?.dataset.focusPlacement).toBe("");
+    await act(async () => { useAppStore.getState().setMode("navigation"); });
+    await act(async () => { shell.click(); });
+    expect(childY()).toBe(originalChildY);
+    expect(shell.style.top).toBe("calc(50% + 0px)");
+    await act(async () => { root.unmount(); });
   });
 
   it("keeps the active card shell footprint stable between navigation and editing", async () => {
@@ -1761,7 +1834,7 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("keeps the top of oversized navigation cards visible and the bottom of oversized editing cards visible", async () => {
+  it.each(["normal", "focused"])("keeps the start of oversized cards visible when entering editing in %s", async (view) => {
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
       value: 720,
@@ -1794,6 +1867,8 @@ describe("DocumentWorkspace", () => {
     await act(async () => {
       root.render(<DocumentWorkspace document={snapshot.summary} />);
     });
+
+    if (view === "focused") await act(async () => { dispatchNativeMenuAction("view-focused"); });
 
     await act(async () => {
       window.dispatchEvent(
@@ -1828,7 +1903,7 @@ describe("DocumentWorkspace", () => {
     ) as HTMLDivElement | null;
 
     expect(useAppStore.getState().mode).toBe("editing");
-    expect(editingShell?.style.top).toBe("-528px");
+    expect(editingShell?.style.top).toBe("48px");
     expect(editingShell?.style.transform).toBe("translateX(-50%)");
 
     await act(async () => {
@@ -2506,6 +2581,167 @@ describe("DocumentWorkspace", () => {
     });
   });
 
+  it("shows focused direction hints only for existing navigation destinations", async () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      { ...snapshot.cards[2]!, id: "card-c", orderIndex: 2 },
+      { ...snapshot.cards[2]!, id: "child-b", parentId: "card-b", orderIndex: 0 },
+    );
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-b");
+    useAppStore.setState({ mode: "navigation" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    const directions = () => Array.from(container.querySelectorAll('[data-testid^="focused-chevron-"]'))
+      .map((element) => element.getAttribute("data-testid")!.replace("focused-chevron-", "")).sort();
+    const press = async (key: string) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
+    };
+    expect(directions()).toEqual([]);
+    await act(async () => { dispatchNativeMenuAction("view-focused"); });
+    expect(directions()).toEqual(["down", "left", "right", "up"]);
+    const hints = container.querySelector('[data-testid="focused-navigation-hints"]') as HTMLElement;
+    expect(hints.getAttribute("aria-hidden")).toBe("true");
+    expect(hints.className).toContain("pointer-events-none");
+    expect(hints.querySelector("svg")?.getAttribute("stroke")).toBe("var(--fc-color-overview-connector)");
+    await press("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("child-b");
+    expect(directions()).toEqual(["left"]);
+    await press("ArrowLeft");
+    expect(directions()).toEqual(["down", "left", "right", "up"]);
+    await press("ArrowUp");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(directions()).toEqual(["down", "left"]);
+    await press("ArrowDown");
+    await press("ArrowDown");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-c");
+    expect(directions()).toEqual(["left", "up"]);
+    await act(async () => { dispatchNativeMenuAction("view-normal"); });
+    expect(directions()).toEqual([]);
+    await act(async () => { dispatchNativeMenuAction("view-wide-lens"); });
+    expect(directions()).toEqual([]);
+    await act(async () => { dispatchNativeMenuAction("view-focused"); });
+    await press("ArrowLeft");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-root");
+    // A root card can still move left to its document context.
+    expect(directions()).toEqual(["left", "right"]);
+    await press("ArrowLeft");
+    expect(directions()).toEqual([]);
+    await act(async () => { root.unmount(); });
+  });
+
+  it("shows only same-parent siblings in Focused, including roots, regardless of the Normal neighbor preference", async () => {
+    let snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      { ...snapshot.cards[2]!, id: "card-c", orderIndex: 2 },
+      { ...snapshot.cards[0]!, id: "other-root", orderIndex: 1 },
+      { ...snapshot.cards[2]!, id: "cousin", parentId: "other-root", orderIndex: 0 },
+      { ...snapshot.cards[2]!, id: "child-b", parentId: "card-b", orderIndex: 0 },
+    );
+    for (const card of snapshot.cards) snapshot = replaceCardContent(snapshot, {
+      cardId: card.id, contentJson: contentJsonForPlainText(card.id),
+    });
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-b");
+    useAppStore.setState({ mode: "navigation" });
+    useSettingsStore.getState().setNeighborCards("hidden");
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    const previews = () => Array.from(container.querySelectorAll<HTMLElement>('[data-testid="tree-card"]'));
+    const visibleText = () => previews().map((card) => contentText(card.dataset.contentJson!)).sort();
+    expect(visibleText()).toEqual([]);
+    await act(async () => { dispatchNativeMenuAction("view-focused"); });
+    expect(visibleText()).toEqual(["card-a", "card-c"]);
+    expect(previews().every((card) => Number(card.dataset.x) === 0)).toBe(true);
+    expect(Number(previews().find((card) => contentText(card.dataset.contentJson!) === "card-a")!.dataset.y)).toBeLessThan(0);
+    expect(Number(previews().find((card) => contentText(card.dataset.contentJson!) === "card-c")!.dataset.y)).toBeGreaterThan(0);
+    const stage = container.querySelector('[data-testid="document-stage"]') as HTMLElement;
+    expect(stage.style.getPropertyValue("--fc-card-width")).toBe("880px");
+    expect(container.querySelector('[data-testid="empty-child-gap"]')).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(useInteractionStore.getState().activeCardId).toBe("card-c");
+    expect(visibleText()).toEqual(["card-a", "card-b"]);
+    // Navigation can still cross parent groups; the newly selected group alone is visible.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(useInteractionStore.getState().activeCardId).toBe("cousin");
+    expect(visibleText()).toEqual([]);
+    await act(async () => { useInteractionStore.getState().setActiveCardId("card-root"); });
+    expect(visibleText()).toEqual(["other-root"]);
+    await act(async () => { dispatchNativeMenuAction("view-normal"); });
+    expect(visibleText()).toEqual([]);
+    await act(async () => { root.unmount(); });
+  });
+
+  it.each(["keyboard", "menu"])("steps through three view modes using %s while preserving navigation", async (source) => {
+    const snapshot = makeDocumentSnapshot();
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    useAppStore.setState({ mode: "navigation" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    const stage = container.querySelector('[data-testid="document-stage"]') as HTMLElement;
+    const zoom = async (direction: "in" | "out") => {
+      await act(async () => {
+        if (source === "menu") dispatchNativeMenuAction(direction === "in" ? "zoom-in" : "zoom-out");
+        else window.dispatchEvent(new KeyboardEvent("keydown", { key: direction === "in" ? "=" : "-", metaKey: true, bubbles: true, cancelable: true }));
+      });
+    };
+    expect(stage.dataset.viewMode).toBe("normal");
+    const normalWidth = stage.style.getPropertyValue("--fc-card-width");
+    await zoom("in");
+    expect(stage.dataset.viewMode).toBe("focused");
+    expect(stage.style.getPropertyValue("--fc-card-width")).toBe("880px");
+    expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(0);
+    expect(container.querySelector('[data-testid="empty-child-gap"]')).toBeNull();
+    expect((container.querySelector('[data-testid="active-card-shell"]') as HTMLElement).style.left).toBe("calc(50% + 0px)");
+    await zoom("in");
+    expect(stage.dataset.viewMode).toBe("focused");
+    for (const [key, selected] of [["ArrowRight", "card-a"], ["ArrowDown", "card-b"], ["ArrowLeft", "card-root"]]) {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
+      expect(useInteractionStore.getState().activeCardId).toBe(selected);
+      expect(stage.dataset.viewMode).toBe("focused");
+      expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(selected === "card-root" ? 0 : 1);
+    }
+    await act(async () => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 600 });
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(stage.style.getPropertyValue("--fc-card-width")).toBe("552px");
+    await act(async () => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+      window.dispatchEvent(new Event("resize"));
+    });
+    await zoom("out");
+    expect(stage.dataset.viewMode).toBe("normal");
+    expect(stage.style.getPropertyValue("--fc-card-width")).toBe(normalWidth);
+    expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(2);
+    await zoom("out");
+    expect(stage.dataset.viewMode).toBe("wide-lens");
+    expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(3);
+    await zoom("out");
+    expect(stage.dataset.viewMode).toBe("wide-lens");
+    await act(async () => { dispatchNativeMenuAction("view-focused"); });
+    expect(stage.dataset.viewMode).toBe("focused");
+    await act(async () => { dispatchNativeMenuAction("view-normal"); });
+    expect(stage.dataset.viewMode).toBe("normal");
+    await act(async () => { dispatchNativeMenuAction("view-wide-lens"); });
+    expect(stage.dataset.viewMode).toBe("wide-lens");
+    await act(async () => { root.unmount(); });
+  });
+
   it("uses native zoom menu actions to enter and exit overview", async () => {
     const snapshot = {
       ...makeDocumentSnapshot(),
@@ -2638,7 +2874,11 @@ describe("DocumentWorkspace", () => {
     globalThis.ResizeObserver = class extends ResizeObserverMock {
       constructor(callback: ResizeObserverCallback) {
         super();
-        notifyResize = () => callback([], this as unknown as ResizeObserver);
+        this.notify = () => callback([], this as unknown as ResizeObserver);
+      }
+      private notify: () => void;
+      observe(element?: Element) {
+        if ((element as HTMLElement | undefined)?.dataset.testid === "active-card-shell") notifyResize = this.notify;
       }
     } as unknown as typeof ResizeObserver;
     // Model actual browser layout: min-height can stretch a short card, so
@@ -2907,8 +3147,16 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("uses Shift+Right to indent the active card under the sibling above", async () => {
-    const snapshot = makeDocumentSnapshot();
+  it.each(["nested", "root"])("uses Shift+Right to indent a %s card under the sibling above and supports undo", async (level) => {
+    const fixture = makeDocumentSnapshot();
+    const snapshot = level === "root"
+      ? {
+          ...fixture,
+          cards: fixture.cards.map((card) =>
+            card.parentId === "card-root" ? { ...card, parentId: null, orderIndex: card.orderIndex + 1 } : card,
+          ),
+        }
+      : fixture;
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -2941,15 +3189,20 @@ describe("DocumentWorkspace", () => {
 
     const nextSnapshot = useDocumentStore.getState().snapshot;
     const rootChildren = nextSnapshot?.cards
-      .filter((card) => card.parentId === "card-root")
+      .filter((card) => card.parentId === (level === "root" ? null : "card-root"))
       .sort((left, right) => left.orderIndex - right.orderIndex);
     const cardAChildren = nextSnapshot?.cards
       .filter((card) => card.parentId === "card-a")
       .sort((left, right) => left.orderIndex - right.orderIndex);
 
-    expect(rootChildren?.map((card) => card.id)).toEqual(["card-a"]);
+    expect(rootChildren?.map((card) => card.id)).toEqual(level === "root" ? ["card-root", "card-a"] : ["card-a"]);
     expect(cardAChildren?.map((card) => card.id)).toEqual(["card-b"]);
     expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+
+    await act(async () => { useDocumentStore.getState().undoNavigation(); });
+    expect(useDocumentStore.getState().snapshot?.cards).toEqual(snapshot.cards);
+    await act(async () => { useDocumentStore.getState().redoNavigation(); });
+    expect(useDocumentStore.getState().snapshot).toEqual(nextSnapshot);
 
     await act(async () => {
       root.unmount();
@@ -3091,6 +3344,68 @@ describe("DocumentWorkspace", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it.each(["sibling-above", "sibling-below", "child"].flatMap((direction) =>
+    ["Backspace", "Escape", "Delete"].map((key) => ({ direction, key })),
+  ))("returns to the source after creating $direction and deleting it with $key", async ({ direction, key }) => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), {
+      cardId: "card-a", contentJson: contentJsonForPlainText("Source"),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "editing", screen: "workspace" });
+    useInteractionStore.getState().setActiveCardId("card-a");
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    await act(async () => {
+      (container.querySelector(`[data-testid="card-editor-create-${direction}"]`) as HTMLButtonElement).click();
+    });
+    const newCardId = useInteractionStore.getState().activeCardId;
+    expect(newCardId).not.toBe("card-a");
+    expect(useDocumentStore.getState().snapshot?.cards).toHaveLength(snapshot.cards.length + 1);
+
+    await act(async () => {
+      if (key === "Backspace") {
+        (container.querySelector('[data-testid="card-editor-delete-empty"]') as HTMLButtonElement).click();
+      } else if (key === "Delete") {
+        useAppStore.getState().setMode("navigation");
+      }
+    });
+    if (key !== "Backspace") {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key })); });
+    }
+    expect(useDocumentStore.getState().snapshot?.cards.some((card) => card.id === newCardId)).toBe(false);
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(useAppStore.getState().mode).toBe(key === "Backspace" ? "editing" : "navigation");
+    await act(async () => { root.unmount(); });
+  });
+
+  it("skips missing visits and descendants removed by subtree deletion", async () => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push({ documentId: "doc-1", id: "child-of-a", parentId: "card-a", orderIndex: 0, type: "card" });
+    snapshot.contents.push({ cardId: "child-of-a", contentJson: NEW_CARD_EDITOR_DOCUMENT_JSON });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "navigation", screen: "workspace" });
+    useInteractionStore.getState().setActiveCardId("card-b");
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    await act(async () => {
+      const { setActiveCardId } = useInteractionStore.getState();
+      setActiveCardId("child-of-a");
+      setActiveCardId("missing-card");
+      setActiveCardId("card-a");
+    });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" })); });
+    expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+    expect(useDocumentStore.getState().snapshot?.cards.map((card) => card.id)).toEqual(["card-root", "card-b"]);
+    await act(async () => { root.unmount(); });
   });
 
   it("returns to the parent after Backspace deletes an empty child card", async () => {
@@ -4145,6 +4460,41 @@ describe("DocumentWorkspace", () => {
     });
   });
 
+  it.each(["", "Occupied target"])("passes copied-card paste through to the editor for linking in %j", async (text) => {
+    const snapshot = replaceCardContent(makeDocumentSnapshot(), { cardId: "card-b", contentJson: contentJsonForPlainText(text) });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "navigation", notice: null, screen: "workspace" });
+    useInteractionStore.setState({ activeCardId: "card-a" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    const copy = createClipboardEvent("copy");
+    await act(async () => { window.dispatchEvent(copy.event); });
+    await act(async () => {
+      useInteractionStore.setState({ activeCardId: "card-b" });
+      useAppStore.setState({ mode: "editing" });
+    });
+    const editor = container.querySelector('[data-testid="card-editor"]')!;
+    const receivePaste = vi.fn();
+    editor.addEventListener("paste", receivePaste);
+    const paste = createClipboardEvent("paste", { [CARD_CLIPBOARD_MIME_TYPE]: copy.data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "" });
+    await act(async () => { editor.dispatchEvent(paste.event); });
+    expect(receivePaste).toHaveBeenCalledOnce();
+    expect(paste.event.defaultPrevented).toBe(false);
+    expect(useDocumentStore.getState().snapshot).toEqual(snapshot);
+    expect(useDocumentStore.getState().editingPast).toHaveLength(0);
+    const foreign = decodeCardClipboardPayload(copy.data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "")!;
+    foreign.source.documentId = "another-document";
+    const rejected = createClipboardEvent("paste", { [CARD_CLIPBOARD_MIME_TYPE]: JSON.stringify(foreign) });
+    await act(async () => { editor.dispatchEvent(rejected.event); });
+    expect(rejected.event.defaultPrevented).toBe(true);
+    expect(receivePaste).toHaveBeenCalledOnce();
+    expect(useAppStore.getState().notice?.message).toContain("existing card in this document");
+    await act(async () => { root.unmount(); });
+  });
+
   it("pastes copied card content into an empty target card", async () => {
     let snapshot = makeDocumentSnapshot();
     const container = document.createElement("div");
@@ -4286,7 +4636,7 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("pastes a cut subtree into another document's empty card", async () => {
+  it.each(["navigation", "editing"] as const)("pastes a cut subtree into another document's empty card in %s mode", async (pasteMode) => {
     let sourceSnapshot = makeDocumentSnapshot();
     const destinationSnapshot = {
       ...makeDocumentSnapshot(),
@@ -4352,7 +4702,7 @@ describe("DocumentWorkspace", () => {
       useDocumentStore.getState().hydrateSnapshot(destinationSnapshot);
       useAppStore.setState({
         activeDocument: destinationSnapshot.summary,
-        mode: "navigation",
+        mode: pasteMode,
         notice: null,
         screen: "workspace",
       });
@@ -4367,32 +4717,52 @@ describe("DocumentWorkspace", () => {
 
     await act(async () => {});
 
+    if (pasteMode === "editing") {
+      await act(async () => {
+        (container.querySelector('[data-testid="card-editor-create-sibling-below"]') as HTMLButtonElement).click();
+      });
+    }
+    const targetCardId = useInteractionStore.getState().activeCardId!;
+    const beforePaste = useDocumentStore.getState().snapshot!;
+    const editorPasteHandler = vi.fn();
+    container.querySelector('[data-testid="card-editor"]')!.addEventListener("paste", editorPasteHandler);
+
     const paste = createClipboardEvent("paste", {
-      [CARD_CLIPBOARD_MIME_TYPE]: cut.data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "",
+      [CARD_CLIPBOARD_MIME_TYPE]: pasteMode === "navigation" ? cut.data.get(CARD_CLIPBOARD_MIME_TYPE) ?? "" : "",
       "text/plain": cut.data.get("text/plain") ?? "",
     });
 
     await act(async () => {
-      window.dispatchEvent(paste.event);
+      container.querySelector('[data-testid="card-editor"]')!.dispatchEvent(paste.event);
     });
 
     const nextSnapshot = useDocumentStore.getState().snapshot;
-    const pastedChildren = nextSnapshot?.cards.filter((card) => card.parentId === "card-b") ?? [];
+    expect(paste.event.defaultPrevented).toBe(true);
+    expect(useAppStore.getState().mode).toBe(pasteMode);
+    expect(useInteractionStore.getState().activeCardId).toBe(targetCardId);
+    expect(editorPasteHandler).not.toHaveBeenCalled();
+    expect(nextSnapshot?.cards).toHaveLength(beforePaste.cards.length + 1);
+    const pastedChildren = nextSnapshot?.cards.filter((card) => card.parentId === targetCardId) ?? [];
 
-    expect(contentText(nextSnapshot?.contents.find((content) => content.cardId === "card-b")?.contentJson ?? "")).toBe("Moved scene");
+    expect(contentText(nextSnapshot?.contents.find((content) => content.cardId === targetCardId)?.contentJson ?? "")).toBe("Moved scene");
     expect(pastedChildren).toHaveLength(1);
     expect(pastedChildren[0]?.documentId).toBe("doc-2");
     expect(contentText(nextSnapshot?.contents.find((content) => content.cardId === pastedChildren[0]?.id)?.contentJson ?? "")).toBe("Moved child");
+
+    await act(async () => { useDocumentStore.getState()[pasteMode === "editing" ? "undoEditing" : "undoNavigation"](); });
+    expect(useDocumentStore.getState().snapshot?.cards).toEqual(beforePaste.cards);
+    await act(async () => { useDocumentStore.getState()[pasteMode === "editing" ? "redoEditing" : "redoNavigation"](); });
+    expect(useDocumentStore.getState().snapshot).toEqual(nextSnapshot);
 
     await act(async () => {
       root.unmount();
     });
   });
 
-  it("does not intercept copy, cut, or paste while editing", async () => {
+  it.each(["", "Editing scene"])("preserves normal text clipboard behavior while editing content %j", async (text) => {
     const snapshot = replaceCardContent(makeDocumentSnapshot(), {
       cardId: "card-a",
-      contentJson: contentJsonForPlainText("Editing scene"),
+      contentJson: contentJsonForPlainText(text),
     });
     const container = document.createElement("div");
     document.body.appendChild(container);
