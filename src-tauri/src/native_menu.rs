@@ -4,7 +4,7 @@ use tauri::{
         Menu, MenuBuilder, MenuEvent, MenuItemBuilder, SubmenuBuilder, HELP_SUBMENU_ID,
         WINDOW_SUBMENU_ID,
     },
-    AppHandle, Emitter, Manager, Runtime,
+    AppHandle, Emitter, Runtime,
 };
 
 pub const MENU_ACTION_EVENT: &str = "fablecraft://menu-action";
@@ -51,6 +51,21 @@ struct MenuActionPayload<'a> {
 }
 
 pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let import_manuscript_markdown = MenuItemBuilder::with_id("import-manuscript-markdown", "Import Manuscript Markdown").build(app)?;
+    let export_manuscript_markdown = MenuItemBuilder::with_id("export-manuscript-markdown", "Export Manuscript Markdown").build(app)?;
+    let write_manuscript = MenuItemBuilder::with_id("write-manuscript", "Write Manuscript").build(app)?;
+    let link_manuscript_passage = MenuItemBuilder::with_id("link-manuscript-passage", "Link Manuscript Passage").build(app)?;
+    let remove_manuscript = MenuItemBuilder::with_id("remove-manuscript", "Remove Manuscript").build(app)?;
+    let layout_tree = MenuItemBuilder::with_id("layout-tree", "Show Tree").build(app)?;
+    let layout_both = MenuItemBuilder::with_id("layout-both", "Show Both").build(app)?;
+    let show_history = MenuItemBuilder::with_id("show-history", "Toggle History")
+        .accelerator(if cfg!(target_os = "macos") { "Cmd+Shift+H" } else { "Ctrl+H" })
+        .enabled(false)
+        .build(app)?;
+    let layout_manuscript = MenuItemBuilder::with_id("layout-manuscript", "Show Manuscript").build(app)?;
+    let pane_left = MenuItemBuilder::with_id("pane-left", "Focus Pane Left").build(app)?;
+    let pane_right = MenuItemBuilder::with_id("pane-right", "Focus Pane Right").build(app)?;
+
     let settings = MenuItemBuilder::with_id(APP_SETTINGS, "Settings")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
@@ -97,19 +112,14 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .accelerator("Tab+Enter")
         .build(app)?;
     let create_child = MenuItemBuilder::with_id(CARD_CREATE_CHILD, "Create Child")
-        .accelerator("CmdOrCtrl+Right")
         .build(app)?;
     let create_anchored_child = MenuItemBuilder::with_id(CARD_CREATE_ANCHORED_CHILD, "Create Child from Passage")
-        .accelerator("CmdOrCtrl+Alt+M")
         .build(app)?;
     let create_parent = MenuItemBuilder::with_id(CARD_CREATE_PARENT, "Create Parent")
-        .accelerator("CmdOrCtrl+Left")
         .build(app)?;
     let create_above = MenuItemBuilder::with_id(CARD_CREATE_ABOVE, "Create Above")
-        .accelerator("CmdOrCtrl+Up")
         .build(app)?;
     let create_below = MenuItemBuilder::with_id(CARD_CREATE_BELOW, "Create Below")
-        .accelerator("CmdOrCtrl+Down")
         .build(app)?;
 
     let command_palette = MenuItemBuilder::with_id(TOOLS_COMMAND_PALETTE, "Command Palette")
@@ -167,6 +177,9 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .separator()
         .item(&import_markdown)
         .item(&export_markdown)
+        .separator()
+        .item(&import_manuscript_markdown)
+        .item(&export_manuscript_markdown)
         .build()?;
 
     let edit_menu = SubmenuBuilder::new(app, "Edit")
@@ -194,9 +207,16 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .item(&create_below)
         .build()?;
 
+    let manuscript_menu = SubmenuBuilder::new(app, "Manuscript")
+        .item(&write_manuscript)
+        .item(&link_manuscript_passage)
+        .item(&remove_manuscript)
+        .build()?;
+
     let tools_menu = SubmenuBuilder::new(app, "Tools")
         .item(&command_palette)
         .item(&search)
+        .item(&show_history)
         .separator()
         .item(&enable_codex)
         .item(&enable_claude_desktop)
@@ -211,6 +231,12 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .item(&wide_lens)
         .item(&normal)
         .item(&focused)
+        .separator()
+        .item(&layout_tree)
+        .item(&layout_both)
+        .item(&layout_manuscript)
+        .item(&pane_left)
+        .item(&pane_right)
         .separator()
         .minimize_with_text("Minimize")
         .fullscreen_with_text("Toggle Full Screen")
@@ -230,6 +256,7 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .item(&file_menu)
         .item(&edit_menu)
         .item(&card_menu)
+        .item(&manuscript_menu)
         .item(&tools_menu)
         .item(&window_menu)
         .item(&help_menu)
@@ -238,13 +265,18 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
 
 pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
     match event.id().0.as_str() {
-        WINDOW_RELOAD => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.reload();
-            }
-
-            return;
-        }
+        "import-manuscript-markdown" => emit_action(app, "import-manuscript-markdown"),
+        "export-manuscript-markdown" => emit_action(app, "export-manuscript-markdown"),
+        "write-manuscript" => emit_action(app, "write-manuscript"),
+        "link-manuscript-passage" => emit_action(app, "link-manuscript-passage"),
+        "remove-manuscript" => emit_action(app, "remove-manuscript"),
+        "layout-tree" => emit_action(app, "layout-tree"),
+        "layout-both" => emit_action(app, "layout-both"),
+        "show-history" => emit_action(app, "show-history"),
+        "layout-manuscript" => emit_action(app, "layout-manuscript"),
+        "pane-left" => emit_action(app, "pane-left"),
+        "pane-right" => emit_action(app, "pane-right"),
+        WINDOW_RELOAD => emit_action(app, "reload-window"),
         FILE_NEW_DOCUMENT => emit_action(app, "new-document"),
         FILE_OPEN_DOCUMENT => emit_action(app, "open-document"),
         FILE_OPEN_RECENT => emit_action(app, "open-recent"),
@@ -285,4 +317,50 @@ pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent
 
 fn emit_action<R: Runtime>(app: &AppHandle<R>, action: &'static str) {
     let _ = app.emit(MENU_ACTION_EVENT, MenuActionPayload { action });
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMenuState {
+    document_open: bool,
+    manuscript: bool,
+    tree_active: bool,
+    split_fits: bool,
+    link: bool,
+    dialog: bool,
+}
+
+#[tauri::command]
+pub fn update_workspace_menu(app: AppHandle, state: WorkspaceMenuState) -> Result<(), String> {
+    let Some(menu) = app.menu() else { return Ok(()) };
+    let document = state.document_open && !state.dialog;
+    let tree = document && state.tree_active;
+    let manuscript = document && state.manuscript;
+    for item in menu.items().map_err(|error| error.to_string())? {
+        let Some(submenu) = item.as_submenu() else { continue };
+        for item in submenu.items().map_err(|error| error.to_string())? {
+            let Some(item) = item.as_menuitem() else { continue };
+            let enabled = match item.id().as_ref() {
+                "layout-both" => {
+                    let label = if state.split_fits { "Show Both" } else { "Show Both (Widen Window)" };
+                    item.set_text(label).map_err(|error| error.to_string())?;
+                    document && state.split_fits
+                }
+                "show-history" => state.document_open,
+                "layout-tree" | "layout-manuscript" | "pane-left" | "pane-right" |
+                "import-manuscript-markdown" | TOOLS_SEARCH => document,
+                "write-manuscript" => document && !state.manuscript,
+                "remove-manuscript" | "export-manuscript-markdown" => manuscript,
+                "link-manuscript-passage" => manuscript && !tree && state.link,
+                FILE_EXPORT_MARKDOWN | CARD_MERGE_ABOVE | CARD_MERGE_BELOW | CARD_SHIFT_UP |
+                CARD_SHIFT_DOWN | CARD_SPLIT | CARD_CREATE_CHILD | CARD_CREATE_ANCHORED_CHILD |
+                CARD_CREATE_PARENT | CARD_CREATE_ABOVE | CARD_CREATE_BELOW | WINDOW_NORMAL |
+                WINDOW_WIDE_LENS | WINDOW_FOCUSED | WINDOW_ZOOM_IN | WINDOW_ZOOM_OUT => tree,
+                EDIT_UNDO | EDIT_REDO => document,
+                _ => continue,
+            };
+            item.set_enabled(enabled).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }

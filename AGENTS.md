@@ -56,15 +56,12 @@ As of the current implementation:
 - Phases 4 and 5 are implemented in their current MVP form: centered active card, parent/child/sibling spatial workspace, and single-plane editing
 - Phase 6 is implemented: command palette, search, settings modal, and help sheet
 - Phase 7 is implemented: Markdown import plus selected-level Markdown / HTML export
-- Phase 8 has a working first pass: local MCP tool registry, in-app MCP runner, Claude-compatible stdio MCP server, read tools, and mutation tools for text and basic tree structure
+- Phase 8 includes the local MCP tool registry, in-app MCP runner, Claude-compatible stdio server, tree and manuscript reads, and revision-checked mutations.
+- Manuscript and History are implemented. The product and engineering briefs describe their workspace behavior, file compatibility, and acceptance coverage.
 
 Still pending:
 
 - External `Open in AI Client` handoff remains a TODO until a concrete target client contract is specified
-
-Known intentional TODO:
-
-- `Tab+Left` bifurcate is not implemented because the briefs do not define the structural behavior precisely enough yet
 
 ## Repo Structure
 

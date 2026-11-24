@@ -8,8 +8,16 @@ use crate::error::{AppError, AppErrorPayload};
 use crate::session::record_open_document;
 use crate::storage::{
     DocumentClock, DocumentRepository, DocumentSnapshot, DocumentSummary, EditableDocumentSnapshot,
-    SaveDocumentResult,
+    HistoryComparison, HistoryCursor, HistoryPage, HistoryVersion, SaveDocumentResult,
 };
+
+pub(crate) async fn document_worker<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, AppErrorPayload> + Send + 'static,
+) -> Result<T, AppErrorPayload> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|error| {
+        AppError::storage("document_worker_failed", "The document operation could not finish.", Some(error.to_string()))
+    })?
+}
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,7 +128,7 @@ fn trash_document(
 }
 
 #[tauri::command]
-pub fn rename_fable_document(
+pub async fn rename_fable_document(
     path: String,
     name: String,
     state: State<'_, AppState>,
@@ -134,7 +142,7 @@ pub fn rename_fable_document(
             .map_err(AppErrorPayload::from)?;
     }
 
-    let summary = DocumentRepository::open(next_path)?;
+    let summary = document_worker(move || DocumentRepository::open(next_path)).await?;
     let current_path = current_document_path(&state).ok();
 
     if current_path.as_ref() == Some(&document_path) {
@@ -145,11 +153,11 @@ pub fn rename_fable_document(
 }
 
 #[tauri::command]
-pub fn open_document(
+pub async fn open_document(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<DocumentSummary, AppErrorPayload> {
-    let summary = DocumentRepository::open(PathBuf::from(&path))?;
+    let summary = document_worker(move || DocumentRepository::open(PathBuf::from(path))).await?;
     update_app_state(&state, &summary);
     Ok(summary)
 }
@@ -212,20 +220,92 @@ pub fn load_current_document_clock(
 }
 
 #[tauri::command]
-pub fn save_current_document(
+pub async fn save_current_document(
     snapshot: EditableDocumentSnapshot,
     state: State<'_, AppState>,
 ) -> Result<SaveDocumentResult, AppErrorPayload> {
     let path = current_document_path(&state)?;
-    DocumentRepository::save(path, snapshot)
+    document_worker(move || DocumentRepository::save(path, snapshot)).await
 }
 
 #[tauri::command]
-pub fn save_document(
+pub async fn save_document(
     path: String,
     snapshot: EditableDocumentSnapshot,
 ) -> Result<SaveDocumentResult, AppErrorPayload> {
-    DocumentRepository::save(PathBuf::from(path), snapshot)
+    document_worker(move || DocumentRepository::save(PathBuf::from(path), snapshot)).await
+}
+
+#[tauri::command]
+pub async fn save_document_recovery_copy(
+    path: String,
+    mut snapshot: EditableDocumentSnapshot,
+) -> Result<DocumentSummary, AppErrorPayload> {
+    document_worker(move || {
+        let path = PathBuf::from(path);
+        let summary = DocumentRepository::create(path.clone())?;
+        snapshot.base_revision_id = None;
+        snapshot.manuscript_aware = true;
+        snapshot.document_id = summary.document_id.clone();
+        for card in &mut snapshot.cards {
+            card.document_id = summary.document_id.clone();
+        }
+        DocumentRepository::save(path.clone(), snapshot)?;
+        DocumentRepository::open(path)
+    }).await
+}
+
+#[tauri::command]
+pub async fn list_document_history(
+    path: String,
+    document_id: String,
+    before: Option<HistoryCursor>,
+    selected: Option<String>,
+    expanded: Option<bool>,
+    known: Option<HistoryVersion>,
+) -> Result<HistoryPage, AppErrorPayload> {
+    document_worker(move || {
+        if expanded.unwrap_or(false) {
+            DocumentRepository::history_view(path.into(), document_id, before, selected, true, known)
+        } else {
+            DocumentRepository::prepared_history_page(path.into(), document_id, before, selected, known)
+        }
+    }).await
+}
+
+#[tauri::command]
+pub async fn prepare_document_history(path: String, document_id: String) -> Result<(), AppErrorPayload> {
+    document_worker(move || DocumentRepository::request_history_preparation(path.into(), document_id)).await
+}
+
+#[tauri::command]
+pub async fn compare_document_history(
+    path: String,
+    document_id: String,
+    revision_ids: Vec<String>,
+    baselines: Option<std::collections::HashMap<String, Option<String>>>,
+    newer: Option<bool>,
+) -> Result<std::collections::HashMap<String, HistoryComparison>, AppErrorPayload> {
+    document_worker(move || DocumentRepository::compare_history(path.into(), document_id, revision_ids, baselines.unwrap_or_default(), newer.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn load_historical_snapshot(
+    path: String,
+    document_id: String,
+    revision_id: String,
+) -> Result<EditableDocumentSnapshot, AppErrorPayload> {
+    document_worker(move || DocumentRepository::historical_snapshot(path.into(), document_id, revision_id)).await
+}
+
+#[tauri::command]
+pub async fn restore_historical_snapshot(
+    path: String,
+    document_id: String,
+    revision_id: String,
+    expected_head: Option<String>,
+) -> Result<DocumentSnapshot, AppErrorPayload> {
+    document_worker(move || DocumentRepository::restore_revision(path.into(), document_id, revision_id, expected_head)).await
 }
 
 #[tauri::command]

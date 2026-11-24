@@ -5,19 +5,12 @@ import {
 } from "./documentActions";
 import { exportCurrentLevel, markdownToContentJson, type ExportFormat } from "../domain/document/importExport";
 import { replaceCardContent } from "../domain/document/content";
+import { toEditableDocumentSnapshot } from "../domain/document/serialization";
 import type { DocumentSnapshot } from "../domain/document/types";
 import { createDocumentAtPath } from "../storage/documents";
 import { loadCurrentDocumentSnapshot, saveCurrentDocumentSnapshot } from "../storage/documentSnapshots";
 import { readTextFileAtPath, writeTextFileAtPath } from "../storage/textFiles";
 import type { DocumentSummary } from "../types/document";
-
-function editableSnapshot(snapshot: DocumentSnapshot) {
-  return {
-    cards: snapshot.cards,
-    contents: snapshot.contents,
-    documentId: snapshot.summary.documentId,
-  };
-}
 
 function rootCardId(snapshot: DocumentSnapshot) {
   return snapshot.cards.find((card) => card.parentId === null)?.id ?? null;
@@ -50,7 +43,7 @@ export async function importMarkdownDocument(): Promise<DocumentSummary | null> 
     contentJson: markdownToContentJson(markdown),
   });
 
-  await saveCurrentDocumentSnapshot(editableSnapshot(nextSnapshot));
+  await saveCurrentDocumentSnapshot(toEditableDocumentSnapshot(nextSnapshot));
 
   return document;
 }

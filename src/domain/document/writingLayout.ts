@@ -10,12 +10,16 @@ export interface WritingViewportTokens {
   verticalInset: number;
 }
 
-export function writingViewport(width: number, tokens: WritingViewportTokens, focused = false) {
+export function writingViewport(
+  width: number,
+  tokens: WritingViewportTokens,
+  { focused = false, showParentInTwoColumns = false } = {},
+) {
   const available = Math.min(focused ? tokens.focusedCardWidth : Infinity, Math.max(1, width - tokens.margin * 2));
   const columns = Math.max(1, Math.min(focused ? 1 : tokens.maximumColumns,
     Math.floor((available + tokens.spacing) / (tokens.minimumCardWidth + tokens.spacing))));
   const cardWidth = Math.max(1, (available - (columns - 1) * tokens.spacing) / columns);
-  const activeColumn = columns >= 3 ? 1 : 0;
+  const activeColumn = columns >= 3 || (columns === 2 && showParentInTwoColumns) ? 1 : 0;
   return {
     columns,
     cardWidth,

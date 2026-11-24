@@ -1,5 +1,6 @@
 import {
   firstChildCardId,
+  navigationBoundaryCardId,
   preferredChildCardId,
   nextSiblingCardId,
   nextVisibleCardId,
@@ -11,6 +12,26 @@ import {
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 describe("document navigation", () => {
+  it("jumps to same-parent boundaries and the current branch root across uneven trees", () => {
+    const { cards } = makeDocumentSnapshot();
+    cards.push(
+      { ...cards[1]!, id: "last", orderIndex: 3 },
+      { ...cards[0]!, id: "other-root", orderIndex: 1 },
+      { ...cards[1]!, id: "cousin", parentId: "other-root", orderIndex: 0 },
+      { ...cards[1]!, id: "deep", parentId: "card-b", orderIndex: 0 },
+      { ...cards[1]!, id: "deeper", parentId: "deep", orderIndex: 0 },
+    );
+    expect(navigationBoundaryCardId(cards, "card-b", "up")).toBe("card-a");
+    expect(navigationBoundaryCardId(cards, "card-b", "down")).toBe("last");
+    expect(navigationBoundaryCardId(cards, "cousin", "up")).toBe("cousin");
+    expect(navigationBoundaryCardId(cards, "cousin", "down")).toBe("cousin");
+    expect(navigationBoundaryCardId(cards, "deeper", "left")).toBe("card-root");
+    expect(navigationBoundaryCardId(cards, "cousin", "left")).toBe("other-root");
+    expect(navigationBoundaryCardId(cards, "other-root", "left")).toBe("other-root");
+    expect(navigationBoundaryCardId(cards, "other-root", "up")).toBe("card-root");
+    expect(navigationBoundaryCardId(cards, "card-root", "down")).toBe("other-root");
+    expect(navigationBoundaryCardId(cards, "missing", "left")).toBeNull();
+  });
   it("uses remembered direct children and falls back for deleted or reparented targets", () => {
     const { cards } = makeDocumentSnapshot();
     expect(preferredChildCardId(cards, "card-root", { "card-root": "card-b" })).toBe("card-b");

@@ -10,23 +10,9 @@ import {
 const DOCUMENT_FILTERS = [{ name: "Fablecraft documents", extensions: ["fable"] }];
 const MARKDOWN_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown"] }];
 
-export async function promptForNewDocument() {
+async function promptToCreateDocument(title: string, defaultPath: string) {
   const selectedPath = await save({
-    title: "Create Fablecraft document",
-    filters: DOCUMENT_FILTERS,
-    defaultPath: "untitled.fable",
-  });
-
-  if (!selectedPath) {
-    return null;
-  }
-
-  return createDocumentAtPath(ensureFableExtension(selectedPath));
-}
-
-export async function promptForConvertedCardDocument(defaultPath = "untitled.fable") {
-  const selectedPath = await save({
-    title: "Convert Card to Document",
+    title,
     filters: DOCUMENT_FILTERS,
     defaultPath,
   });
@@ -36,6 +22,14 @@ export async function promptForConvertedCardDocument(defaultPath = "untitled.fab
   }
 
   return createDocumentAtPath(ensureFableExtension(selectedPath));
+}
+
+export function promptForNewDocument() {
+  return promptToCreateDocument("Create Fablecraft document", "untitled.fable");
+}
+
+export function promptForNewDocumentFromTree(defaultPath: string) {
+  return promptToCreateDocument("New Document From Tree", defaultPath);
 }
 
 export async function promptForOpenDocument() {
@@ -53,9 +47,9 @@ export async function promptForOpenDocument() {
   return openDocumentAtPath(selectedPath);
 }
 
-export async function promptForMarkdownImportPath() {
+export async function promptForMarkdownImportPath(title = "Select Markdown file") {
   const selectedPath = await open({
-    title: "Select Markdown file",
+    title,
     directory: false,
     multiple: false,
     filters: MARKDOWN_FILTERS,
@@ -85,10 +79,11 @@ export async function promptForMarkdownImportTargetPath(sourcePath: string) {
 export async function promptForExportPath(
   documentName: string,
   format: "html" | "markdown",
+  title = format === "markdown" ? "Export Markdown" : "Export HTML",
 ) {
   const extension = format === "markdown" ? ".md" : ".html";
   const selectedPath = await save({
-    title: format === "markdown" ? "Export Markdown" : "Export HTML",
+    title,
     filters: [
       {
         name: format === "markdown" ? "Markdown" : "HTML",

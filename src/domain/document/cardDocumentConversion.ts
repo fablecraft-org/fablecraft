@@ -58,7 +58,19 @@ export function removeConvertedCardFromSource(
   sourceSnapshot: DocumentSnapshot,
   cardId: string,
 ) {
-  return removeCutSubtree(sourceSnapshot, cardId);
+  const next = removeCutSubtree(sourceSnapshot, cardId);
+  if (!next.manuscript || !next.cards.some((card) => card.id === cardId)) return next;
+  // Conversion can leave the last root as an empty placeholder with its old ID.
+  return {
+    ...next,
+    manuscript: {
+      ...next.manuscript,
+      passages: next.manuscript.passages.flatMap((passage) => {
+        const targetCardIds = passage.targetCardIds.filter((id) => id !== cardId);
+        return targetCardIds.length ? [{ ...passage, targetCardIds }] : [];
+      }),
+    },
+  };
 }
 
 export function defaultConvertedDocumentName(

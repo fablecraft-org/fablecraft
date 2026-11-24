@@ -1,7 +1,12 @@
 import { create } from "zustand";
+import type { WorkspacePane } from "../domain/document/manuscriptLayout";
 import type { AppearanceStep } from "../domain/document/references";
 
 interface InteractionState {
+  workspacePane: WorkspacePane;
+  workspaceDialog: boolean;
+  workspaceSplitFits: boolean;
+  manuscriptLinkEligible: boolean;
   activeCardId: string | null;
   referencePath: AppearanceStep[] | null;
   setActiveAppearance: (path: AppearanceStep[]) => void;
@@ -14,7 +19,11 @@ interface InteractionState {
   setActiveCardId: (cardId: string | null) => void;
 }
 
-export const useInteractionStore = create<InteractionState>((set) => ({
+export const createInteractionStore = () => create<InteractionState>((set) => ({
+  workspacePane: "tree",
+  workspaceDialog: false,
+  workspaceSplitFits: true,
+  manuscriptLinkEligible: false,
   activeCardId: null,
   referencePath: null,
   clearReferencePath: () => set({ referencePath: null }),
@@ -49,3 +58,5 @@ export const useInteractionStore = create<InteractionState>((set) => ({
     };
   }),
 }));
+
+export const useInteractionStore = createInteractionStore();

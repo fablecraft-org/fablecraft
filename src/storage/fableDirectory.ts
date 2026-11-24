@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import type { DocumentSummary, FablecraftError } from "../types/document";
+import type { DocumentSummary } from "../types/document";
+import { documentIdentitySchema, normalizeError } from "./documentResponse";
 
 const fableDirectoryEntrySchema = z.object({
   kind: z.enum(["folder", "document"]),
@@ -19,36 +20,6 @@ const fableDirectorySchema = z.object({
 });
 
 export type FableDirectory = z.infer<typeof fableDirectorySchema>;
-
-const documentSummarySchema = z.object({
-  documentId: z.string().min(1),
-  name: z.string().min(1),
-  openedAtMs: z.number().int().nonnegative(),
-  path: z.string().min(1),
-});
-
-function normalizeError(error: unknown): FablecraftError {
-  if (
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    "message" in error
-  ) {
-    const maybeError = error as Partial<FablecraftError>;
-
-    return {
-      code: maybeError.code ?? "unknown_error",
-      message: maybeError.message ?? "Unknown error",
-      details: maybeError.details ?? null,
-    };
-  }
-
-  return {
-    code: "unknown_error",
-    message: error instanceof Error ? error.message : "Unknown error",
-    details: null,
-  };
-}
 
 export async function listCurrentDocumentDirectory() {
   try {
@@ -71,7 +42,7 @@ export async function listFableDirectory(path: string) {
 export async function createUntitledDocumentInDirectory(path: string): Promise<DocumentSummary> {
   try {
     const payload = await invoke("create_untitled_document_in_directory", { path });
-    return documentSummarySchema.parse(payload);
+    return documentIdentitySchema.parse(payload);
   } catch (error) {
     throw normalizeError(error);
   }
@@ -88,7 +59,7 @@ export async function deleteFableDocument(path: string) {
 export async function renameFableDocument(path: string, name: string): Promise<DocumentSummary> {
   try {
     const payload = await invoke("rename_fable_document", { path, name });
-    return documentSummarySchema.parse(payload);
+    return documentIdentitySchema.parse(payload);
   } catch (error) {
     throw normalizeError(error);
   }

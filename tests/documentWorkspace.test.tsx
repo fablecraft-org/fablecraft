@@ -109,6 +109,7 @@ vi.mock("../src/components/CardEditor", () => ({
 
 vi.mock("../src/components/TreeCardButton", () => ({
   TreeCardButton: ({
+    appearanceId,
     cardLabel,
     contentJson,
     isActive,
@@ -121,6 +122,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     x,
     y,
   }: {
+    appearanceId?: string;
     cardLabel?: string;
     contentJson?: string;
     isActive?: boolean;
@@ -134,6 +136,7 @@ vi.mock("../src/components/TreeCardButton", () => ({
     y?: number;
   }) => (
     <div
+      data-appearance-id={appearanceId}
       data-card-label={cardLabel ?? ""}
       data-content-json={contentJson ?? ""}
       data-is-active={String(Boolean(isActive))}
@@ -645,6 +648,62 @@ describe("DocumentWorkspace", () => {
       expect(useInteractionStore.getState().activeCardId).toBe("card-a");
     }
     await act(async () => { root.unmount(); });
+  });
+
+  it("keeps branch and leaf siblings in their entry column in a two-column stage", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 792 });
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push({ ...snapshot.cards[1]!, id: "grandchild", parentId: "card-b" });
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    useAppStore.setState({ mode: "navigation" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+
+    const horizontalOffset = (id: string) => {
+      const card = container.querySelector<HTMLElement>(`[data-appearance-id="${id}"]`);
+      return Number(card?.dataset.x ?? card?.style.left.match(/([+-]?\d+)px/)?.[1]);
+    };
+    const navigate = (key: string) => act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+    });
+    expect(horizontalOffset("card-root")).toBe(-192);
+    expect(horizontalOffset("card-a")).toBe(192);
+
+    await navigate("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(horizontalOffset("card-root")).toBe(-192);
+    expect(horizontalOffset("card-a")).toBe(192);
+    expect(horizontalOffset("card-b")).toBe(192);
+    expect(container.querySelector('[data-testid="empty-child-gap"]')).toBeNull();
+
+    await navigate("ArrowDown");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+    expect(horizontalOffset("card-root")).toBe(-192);
+    expect(horizontalOffset("card-b")).toBe(192);
+    expect(horizontalOffset("grandchild")).toBeNaN();
+
+    await navigate("ArrowLeft");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-root");
+    expect(horizontalOffset("card-root")).toBe(-192);
+    expect(horizontalOffset("card-a")).toBe(192);
+
+    await navigate("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+    expect(horizontalOffset("card-root")).toBeNaN();
+    expect(horizontalOffset("card-b")).toBe(-192);
+    expect(horizontalOffset("grandchild")).toBe(192);
+
+    await navigate("ArrowUp");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(horizontalOffset("card-root")).toBeNaN();
+    expect(horizontalOffset("card-a")).toBe(-192);
+    expect(container.querySelector('[data-testid="empty-child-gap"]')).not.toBeNull();
+    await act(async () => { root.unmount(); });
+    container.remove();
   });
 
   it("reveals the caret by panning the entire frame and restores placement on card selection", async () => {
@@ -1346,7 +1405,9 @@ describe("DocumentWorkspace", () => {
       await press("ArrowRight");
       if (selection === "preview-file") await press("ArrowDown");
     }
-    await press(creationKey, creationKey === "ArrowRight" ? "meta" : "ctrl");
+    await press("Tab");
+    await press(creationKey);
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keyup", { key: "Tab", bubbles: true })); });
 
     expect(createUntitledDocumentInDirectory).toHaveBeenCalledWith(targetFolder);
     expect(onOpenDocumentPath).not.toHaveBeenCalled();
@@ -1380,6 +1441,29 @@ describe("DocumentWorkspace", () => {
     container.remove();
   });
 
+  it.each(["metaKey", "ctrlKey"])("uses %s arrows for directory endpoints without creating files", async (modifier) => {
+    const snapshot = makeDocumentSnapshot();
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("card-root");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    const press = async (key: string, modified = true) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key, [modifier]: modified, bubbles: true, cancelable: true })); });
+    };
+    await press("ArrowLeft", false);
+    await press("ArrowUp");
+    expect(container.querySelector('[data-testid="directory-card"][data-is-active="true"]')?.textContent).toBe("FOLDERArchive");
+    await press("ArrowDown");
+    expect(container.querySelector('[data-testid="directory-card"][data-is-active="true"]')?.textContent).toBe("FABLEstory");
+    await press("ArrowRight");
+    expect(container.querySelector('[data-testid="directory-card"][data-is-active="true"]')?.textContent).toBe("FABLEstory");
+    expect(createUntitledDocumentInDirectory).not.toHaveBeenCalled();
+    await act(async () => { root.unmount(); });
+  });
+
   it("ignores duplicate creation shortcuts while pending and allows retry after failure", async () => {
     const snapshot = makeDocumentSnapshot();
     loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
@@ -1403,7 +1487,10 @@ describe("DocumentWorkspace", () => {
     }
     await press("ArrowLeft");
     await press("ArrowRight", true);
-    await press("ArrowRight", true);
+    expect(createUntitledDocumentInDirectory).not.toHaveBeenCalled();
+    await press("Tab");
+    await press("ArrowRight");
+    await press("ArrowRight");
     expect(createUntitledDocumentInDirectory).toHaveBeenCalledTimes(1);
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     await act(async () => { rejectCreation(new Error("Could not create file.")); });
@@ -1412,7 +1499,7 @@ describe("DocumentWorkspace", () => {
     expect(container.querySelector("input")).toBeNull();
     expect(onOpenDocumentPath).not.toHaveBeenCalled();
     expect(useDocumentStore.getState().snapshot?.summary.documentId).toBe(snapshot.summary.documentId);
-    await press("ArrowRight", true);
+    await press("ArrowRight");
     expect(createUntitledDocumentInDirectory).toHaveBeenCalledTimes(2);
     expect(container.querySelector<HTMLInputElement>("input")?.value).toBe("Untitled");
     expect(onOpenDocumentPath).not.toHaveBeenCalled();
@@ -2381,6 +2468,62 @@ describe("DocumentWorkspace", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("slides the selected sibling from its preview position and continues from interrupted motion", async () => {
+    const snapshot = makeDocumentSnapshot();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const originalAnimate = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
+    const cancel = vi.fn();
+    const animate = vi.fn(function (this: HTMLElement, _frames: Keyframe[], _options: KeyframeAnimationOptions) {
+      return { cancel, effect: { getComputedTiming: () => ({ progress: 0.5 }) } };
+    });
+    Object.defineProperty(Element.prototype, "animate", { configurable: true, value: animate });
+
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useAppStore.setState({ activeDocument: snapshot.summary, mode: "navigation", screen: "workspace" });
+    useInteractionStore.setState({ activeCardId: "card-b" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+
+    const activeSlide = () => animate.mock.calls.find((_, index) =>
+      animate.mock.contexts[index].dataset.testid === "active-card-shell");
+    try {
+      await act(async () => root.render(<DocumentWorkspace document={snapshot.summary} />));
+      const preview = container.querySelector<HTMLElement>('[data-appearance-id="card-a"]');
+      const previousY = Number(preview?.dataset.y);
+      expect(previousY).toBeLessThan(0);
+      expect(animate).not.toHaveBeenCalled();
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowUp" }));
+      });
+
+      expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+      expect(activeSlide()).toEqual([
+        [{ translate: `0px ${previousY}px` }, { translate: "0px 0px" }],
+        expect.objectContaining({ duration: 150 }),
+      ]);
+
+      const priorSiblingSlide = animate.mock.calls.find((_, index) =>
+        animate.mock.contexts[index].dataset.appearanceId === "card-b");
+      const previewY = Number(container.querySelector<HTMLElement>('[data-appearance-id="card-b"]')?.dataset.y);
+      const priorOffsetY = parseFloat(String(priorSiblingSlide?.[0][0].translate).split(" ")[1]);
+      animate.mockClear();
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
+      });
+
+      expect(useInteractionStore.getState().activeCardId).toBe("card-b");
+      expect(activeSlide()?.[0][0].translate).toBe(`0px ${previewY + priorOffsetY / 2}px`);
+      expect(cancel).toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      if (originalAnimate) Object.defineProperty(Element.prototype, "animate", originalAnimate);
+      else Reflect.deleteProperty(Element.prototype, "animate");
+    }
   });
 
   it("recenters the active card after arrow navigation from a panned workspace", async () => {
@@ -4209,7 +4352,59 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("lets Cmd+ArrowDown fall through without creating a sibling", async () => {
+  it.each(["metaKey", "ctrlKey"].flatMap(modifier =>
+    ["normal", "focused", "wide-lens"].map(view => [modifier, view]),
+  ))("jumps to sibling boundaries and the branch root with %s in %s", async (modifier, view) => {
+    const snapshot = makeDocumentSnapshot();
+    snapshot.cards.push(
+      { ...snapshot.cards[1]!, id: "first", parentId: "card-a", orderIndex: 0 },
+      { ...snapshot.cards[1]!, id: "middle", parentId: "card-a", orderIndex: 1 },
+      { ...snapshot.cards[1]!, id: "last", parentId: "card-a", orderIndex: 2 },
+      { ...snapshot.cards[1]!, id: "cousin", parentId: "card-b", orderIndex: 0 },
+    );
+    useDocumentStore.getState().hydrateSnapshot(snapshot);
+    useInteractionStore.getState().setActiveCardId("middle");
+    useAppStore.setState({ mode: "navigation" });
+    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
+    await act(async () => { dispatchNativeMenuAction(view === "normal" ? "view-normal" : view === "focused" ? "view-focused" : "view-wide-lens"); });
+    const before = useDocumentStore.getState().snapshot;
+    const press = async (key: string, modified = true) => {
+      const event = new KeyboardEvent("keydown", { key, [modifier]: modified, bubbles: true, cancelable: true });
+      await act(async () => { window.dispatchEvent(event); });
+      return event;
+    };
+    expect((await press("ArrowUp")).defaultPrevented).toBe(true);
+    expect(useInteractionStore.getState().activeCardId).toBe("first");
+    await press("ArrowDown");
+    expect(useInteractionStore.getState().activeCardId).toBe("last");
+    await press("ArrowDown");
+    expect(useInteractionStore.getState().activeCardId).toBe("last");
+    await act(async () => { useInteractionStore.getState().setActiveCardId("middle"); });
+    await press("ArrowLeft");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-root");
+    expect(useInteractionStore.getState().rememberedChildIds).toMatchObject({ "card-root": "card-a", "card-a": "middle" });
+    const memory = useInteractionStore.getState().rememberedChildIds;
+    await press("ArrowLeft");
+    await press("ArrowUp");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-root");
+    expect(useInteractionStore.getState().rememberedChildIds).toEqual(memory);
+    await press("ArrowRight", false);
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    await press("ArrowRight", false);
+    expect(useInteractionStore.getState().activeCardId).toBe("middle");
+    await press("ArrowRight");
+    expect(useInteractionStore.getState().activeCardId).toBe("middle");
+    expect(useDocumentStore.getState().snapshot).toEqual(before);
+    expect(useDocumentStore.getState().navigationPast).toHaveLength(0);
+    expect(useAppStore.getState().mode).toBe("navigation");
+    await act(async () => { root.unmount(); });
+  });
+
+  it("uses Cmd+ArrowDown to select the last sibling without creating a card", async () => {
     let snapshot = makeDocumentSnapshot();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -4252,7 +4447,7 @@ describe("DocumentWorkspace", () => {
       .sort((left, right) => left.orderIndex - right.orderIndex);
 
     expect(rootChildren).toHaveLength(2);
-    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+    expect(useInteractionStore.getState().activeCardId).toBe("card-b");
     expect(useAppStore.getState().mode).toBe("navigation");
 
     await act(async () => {

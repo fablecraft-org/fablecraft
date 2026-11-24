@@ -13,8 +13,10 @@ const shortcutRows = [
   ["Type", "Start editing immediately with the typed character"],
   ["Escape", "Return to navigation"],
   ["Arrow keys", "Move through the spatial tree"],
+  ["Cmd/Ctrl + Up / Down", "Jump to the first / last same-parent sibling in navigation mode"],
+  ["Cmd/Ctrl + Left", "Jump to the root card in navigation mode"],
   ["Tab + Arrow keys", "Create cards while navigating or editing"],
-  ["Cmd/Ctrl + Alt + M / Tab + Right", "Create a child anchored to selected text while editing"],
+  ["Tab + Right", "Create a child anchored to selected text while editing"],
   ["Shift + Up / Down", "Move within the current column, even across parent groups"],
   ["Shift + Left", "Outdent the current card"],
   ["Shift + Right", "Indent under the sibling above as its last child"],
@@ -26,15 +28,23 @@ const shortcutRows = [
   ["Right, then Up", "Enter owned children first, then explore reference cards above them"],
   ["Enter on a reference", "Jump to the original card to edit"],
   ["Cmd/Ctrl + S", "Flush pending changes immediately"],
-  ["Cmd/Ctrl + F", "Search the document"],
+  ["Cmd/Ctrl + F", "Search the active pane"],
+  ["Cmd + Shift + H (Mac)", "Toggle History"],
+  ["Ctrl + H (Windows / Linux)", "Toggle History"],
+  ["Cmd + Option + Left / Right (Mac)", "Step between the Tree and Manuscript panes"],
+  ["Ctrl + Alt + Left / Right (Windows / Linux)", "Step between the Tree and Manuscript panes"],
+  ["#B02 in Manuscript", "Link the whole paragraph to the existing card"],
+  ["Control + L", "Switch to Tree for selected manuscript text, then press Enter on a card to link it"],
   ["Cmd/Ctrl + K", "Toggle the command palette"],
   ["Cmd/Ctrl + − / +", "Step between Wide Lens, Normal, and Focused views"],
 ];
 
 const commandGroups = [
-  { commands: ["Wide Lens", "Normal", "Focused"], label: "View" },
+  { commands: ["Show Tree", "Show Both", "Show Manuscript", "Focus Pane Left / Right", "Wide Lens", "Normal", "Focused"], label: "View" },
+  { commands: ["Write Manuscript", "Remove Manuscript", "Link Manuscript Passage",
+    "Import Manuscript Markdown", "Export Manuscript Markdown"], label: "Manuscript" },
   {
-    commands: ["New Document", "Open Document", "Import Markdown", "Export Level (MD / HTML)"],
+    commands: ["New Document", "New Document From Tree", "Open Document", "Show History", "Import Markdown", "Export Level (MD / HTML)"],
     label: "Document",
   },
   {

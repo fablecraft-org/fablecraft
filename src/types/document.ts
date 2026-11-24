@@ -1,4 +1,5 @@
 export interface DocumentSummary {
+  createdAtMs?: number;
   documentId: string;
   fileModifiedAtMs?: number;
   name: string;

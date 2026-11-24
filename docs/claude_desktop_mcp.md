@@ -65,11 +65,13 @@ Read tools:
 
 - `fablecraft_get_open_documents`
 - `fablecraft_get_document`
+- `fablecraft_get_manuscript`
 - `fablecraft_get_card`
 - `fablecraft_get_subtree`
 
 Mutation tools:
 
+- `fablecraft_edit_manuscript`
 - `fablecraft_set_card_text`
 - `fablecraft_create_child`
 - `fablecraft_create_sibling_before`
@@ -78,9 +80,13 @@ Mutation tools:
 - `fablecraft_wrap_level_in_parent`
 - `fablecraft_delete_card`
 
-The MCP server exposes document and card-plane tools only. Folder-context file operations such as deleting a `.fable` document remain desktop UI actions guarded by the app confirmation dialog.
+Folder-context operations such as deleting a `.fable` document use the desktop confirmation flow.
 
 `fablecraft_get_document` returns `treeDepthCounts`, where `[1, 4, 7, 32]` means the root depth has 1 card, the next depth has 4 cards, and so on. `fablecraft_get_card` returns ordered direct `childCardIds`. Mutation tools return lightweight status payloads rather than full document snapshots.
+
+### Manuscript ranges
+
+Read `fablecraft_get_manuscript` with `documentPath` to obtain the current manuscript and `revisionId`. It returns an empty manuscript value when the document has none. To edit an existing manuscript, pass its `revisionId` as `baseRevisionId` to `fablecraft_edit_manuscript`. Supply `from` and `to` as ProseMirror positions and `insert` as an array of rich-text nodes. Text offsets count UTF-16 code units. Equal endpoints insert at a position and an empty array deletes the range. A stale revision requires reading the manuscript again before retrying.
 
 ### Card Text And Headings
 

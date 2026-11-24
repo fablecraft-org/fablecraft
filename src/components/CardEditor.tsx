@@ -12,8 +12,14 @@ import { CardLinkNode, convertTypedCardLink } from "./cardLinkNode";
 import { CARD_LINK_NODE } from "../domain/document/cardLinks";
 import { PassageAnchorMark } from "./passageAnchorMark";
 import { PASSAGE_ANCHOR_MARK } from "../domain/document/passageAnchors";
+import { HistoryAdditions, showHistoryAdditions, type HistoryTextRange } from "./historyAdditions";
 
 interface CardEditorProps {
+  readOnly?: boolean;
+  historyRange?: { from: number; to: number };
+  historyRangeRequest?: number;
+  historyAdditions?: readonly HistoryTextRange[];
+  paneActive?: boolean;
   onRevealSelection?: (bounds: { top: number; bottom: number }) => void;
   selectionViewportKey?: string;
   cardLabels?: Record<string, string>;
@@ -159,6 +165,11 @@ export function isSelectionAtCardBoundary(
 }
 
 export function CardEditor({
+  readOnly = false,
+  historyRange,
+  historyRangeRequest,
+  historyAdditions,
+  paneActive = true,
   onRevealSelection,
   selectionViewportKey,
   cardLabels, documentId, onOpenCardLink,
@@ -257,6 +268,7 @@ export function CardEditor({
   linkContext.current = { cardLabels, documentId, onOpenCardLink };
 
   const editor = useEditor({
+    editable: !readOnly && isEditing,
     autofocus: false,
     content: JSON.parse(contentJson),
     editorProps: {
@@ -270,6 +282,8 @@ export function CardEditor({
           "fc-editor w-full min-h-[1.5rem] outline-none font-[var(--fc-font-content)] text-[length:var(--fc-content-size)] leading-[var(--fc-content-line-height)] text-[var(--fc-color-text)]",
       },
       handleDOMEvents: {
+        compositionstart(view) { view.dom.dataset.editorComposing = "true"; return false; },
+        compositionend(view) { delete view.dom.dataset.editorComposing; return false; },
         click(_, event) {
           const target = event.target instanceof Element
             ? event.target.closest<HTMLElement>("[data-fc-child-id]") : null;
@@ -289,6 +303,7 @@ export function CardEditor({
         return new Slice(strip(slice.content), slice.openStart, slice.openEnd);
       },
       handleKeyDown(_, event): boolean {
+        if (readOnly) return false;
         const currentEditor = editorRef.current;
 
         if (currentEditor && event.key === " " && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey &&
@@ -299,13 +314,6 @@ export function CardEditor({
 
         if (!currentEditor) {
           return false;
-        }
-
-        if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey &&
-          (event.code === "KeyM" || event.key.toLowerCase() === "m")) {
-          event.preventDefault();
-          createOrOpenPassageAnchor(currentEditor);
-          return true;
         }
 
         if (event.key === "Escape") {
@@ -335,6 +343,10 @@ export function CardEditor({
           return true;
         }
 
+        if ((event.metaKey || event.ctrlKey) && event.key.startsWith("Arrow")) {
+          return false;
+        }
+
         if (
           event.altKey &&
           event.metaKey === false &&
@@ -351,7 +363,7 @@ export function CardEditor({
           }
         }
 
-        if (isTabHeld() && event.key === "ArrowUp") {
+        if (isTabHeld() && !event.metaKey && !event.ctrlKey && !event.altKey && event.key === "ArrowUp") {
           event.preventDefault();
           if (canCreateStructure) {
             onCreateSiblingAbove();
@@ -359,7 +371,7 @@ export function CardEditor({
           return true;
         }
 
-        if (isTabHeld() && event.key === "ArrowDown") {
+        if (isTabHeld() && !event.metaKey && !event.ctrlKey && !event.altKey && event.key === "ArrowDown") {
           event.preventDefault();
           if (canCreateStructure) {
             onCreateSiblingBelow();
@@ -367,7 +379,7 @@ export function CardEditor({
           return true;
         }
 
-        if (isTabHeld() && event.key === "ArrowRight") {
+        if (isTabHeld() && !event.metaKey && !event.ctrlKey && !event.altKey && event.key === "ArrowRight") {
           event.preventDefault();
           if (!currentEditor.state.selection.empty) {
             createOrOpenPassageAnchor(currentEditor);
@@ -379,7 +391,7 @@ export function CardEditor({
           return true;
         }
 
-        if (isTabHeld() && event.key === "ArrowLeft") {
+        if (isTabHeld() && !event.metaKey && !event.ctrlKey && !event.altKey && event.key === "ArrowLeft") {
           event.preventDefault();
           if (canCreateStructure) {
             onCreateParentLevel();
@@ -456,6 +468,7 @@ export function CardEditor({
         }
 
         if (event.key === "Tab") {
+          if (event.metaKey || event.ctrlKey || event.altKey) return false;
           event.preventDefault();
           tabHeldRef.current = true;
           setTabKeyHeldAcrossEditors(true);
@@ -552,6 +565,7 @@ export function CardEditor({
       },
     },
     extensions: [
+      HistoryAdditions,
       PassageAnchorMark,
       CardLinkNode.configure({
         getLabels: () => linkContext.current.cardLabels ?? {},
@@ -575,7 +589,7 @@ export function CardEditor({
       }
     },
     onUpdate({ editor: nextEditor }) {
-      onUpdateContent(JSON.stringify(nextEditor.getJSON()));
+      if (!readOnly) onUpdateContent(JSON.stringify(nextEditor.getJSON()));
       scheduleSelectionReveal(nextEditor);
     },
     onSelectionUpdate({ editor: nextEditor }) {
@@ -584,6 +598,16 @@ export function CardEditor({
   });
 
   editorRef.current = editor;
+
+  useEffect(() => {
+    if (!readOnly || !editor || !paneActive || !historyRange) return;
+    const frame = requestAnimationFrame(() => {
+      if (editor.isDestroyed) return;
+      const position = Math.min(historyRange.from, editor.state.doc.content.size);
+      revealSelectionRef.current?.(editor.view.coordsAtPos(position));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editor, readOnly, paneActive, historyRange, historyRangeRequest]);
 
   useEffect(() => {
     if (!editor || !isEditing) return;
@@ -603,25 +627,25 @@ export function CardEditor({
       return;
     }
 
-    editor.setEditable(isEditing);
+    if (editor.isEditable !== isEditing) editor.setEditable(isEditing, false);
 
-    if (isEditing && !wasEditingRef.current) {
+    if (isEditing && !wasEditingRef.current && paneActive) {
       editor.commands.focus(undefined, { scrollIntoView: false });
     } else if (!isEditing && wasEditingRef.current) {
       editor.commands.blur();
     }
 
     wasEditingRef.current = isEditing;
-  }, [editor, isEditing]);
+  }, [editor, isEditing, paneActive]);
 
   useEffect(() => {
-    if (!editor || !isEditing || !focusPlacement) {
+    if (!editor || !isEditing || !paneActive || !focusPlacement) {
       return;
     }
 
     editor.commands.focus(focusPlacement);
     onConsumeFocusPlacement();
-  }, [editor, focusPlacement, isEditing, onConsumeFocusPlacement]);
+  }, [editor, focusPlacement, isEditing, onConsumeFocusPlacement, paneActive]);
 
   useEffect(() => {
     if (!editor || !isEditing || !pendingTextInput) {
@@ -645,11 +669,16 @@ export function CardEditor({
   }, [contentJson, editor]);
 
   useEffect(() => {
-    if (!editor || !isEditing) {
+    if (readOnly && editor) showHistoryAdditions(editor, historyAdditions ?? []);
+  }, [editor, readOnly, historyAdditions, contentJson]);
+
+  useEffect(() => {
+    if (!editor || !isEditing || !paneActive) {
       return;
     }
 
     return listenForFrontendMenuActions((action) => {
+      if (editor.view.composing) return;
       if (action === "create-anchored-child") {
         createOrOpenPassageAnchor(editor);
         return;
@@ -672,7 +701,7 @@ export function CardEditor({
             : undefined);
       }
     });
-  }, [canCreateStructure, editor, isEditing, onRedo, onSplitAtSelection, onUndo,
+  }, [canCreateStructure, editor, isEditing, paneActive, onRedo, onSplitAtSelection, onUndo,
     onCreateAnchoredChild, onOpenAnchoredChild, onPassageAnchorError]);
 
   if (!editor) {

@@ -12,14 +12,15 @@ use app_state::AppState;
 use commands::{
     create_document, create_untitled_document_in_directory, delete_fable_document,
     existing_document_paths, list_current_document_directory, list_fable_directory,
-    load_current_document,
+    compare_document_history, list_document_history, prepare_document_history, load_historical_snapshot, restore_historical_snapshot, load_current_document,
     load_current_document_clock, open_document, read_text_file, rename_fable_document,
-    save_current_document, save_document, take_pending_open_document_paths, write_text_file,
+    save_current_document, save_document, save_document_recovery_copy, take_pending_open_document_paths, write_text_file,
 };
 use integrations::{
     enable_claude_desktop_integration, enable_codex_integration, load_local_integration_statuses,
 };
 use mcp::{invoke_mcp_tool, list_mcp_tools};
+use native_menu::update_workspace_menu;
 #[cfg(target_os = "macos")]
 use tauri::{Emitter, Manager};
 
@@ -74,6 +75,11 @@ pub fn run() {
             invoke_mcp_tool,
             list_current_document_directory,
             list_fable_directory,
+            list_document_history,
+            prepare_document_history,
+            compare_document_history,
+            load_historical_snapshot,
+            restore_historical_snapshot,
             list_mcp_tools,
             load_current_document,
             load_current_document_clock,
@@ -83,7 +89,9 @@ pub fn run() {
             rename_fable_document,
             save_current_document,
             save_document,
+            save_document_recovery_copy,
             take_pending_open_document_paths,
+            update_workspace_menu,
             write_text_file
         ])
         .build(tauri::generate_context!())

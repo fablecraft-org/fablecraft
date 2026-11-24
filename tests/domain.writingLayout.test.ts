@@ -18,9 +18,19 @@ describe("responsive writing layout", () => {
     expect(writingViewport(300, tokens)).toMatchObject({ columns: 1, cardWidth: 252, activeX: 0 });
   });
 
+  it("can use the left slot for the parent in a two-column viewport", () => {
+    const options = { showParentInTwoColumns: true };
+    expect(writingViewport(792, tokens, options)).toMatchObject({
+      columns: 2, cardWidth: 360, activeX: 192, minimumDepth: -1, maximumDepth: 0,
+    });
+    for (const width of [791, 1176, 1560]) {
+      expect(writingViewport(width, tokens, options)).toEqual(writingViewport(width, tokens));
+    }
+  });
+
   it.each([[408, 360], [800, 752], [1440, 880], [2560, 880]])(
     "centers a document-width focused card in a %i pixel viewport", (width, cardWidth) => {
-      expect(writingViewport(width, tokens, true)).toMatchObject({ columns: 1, cardWidth,
+      expect(writingViewport(width, tokens, { focused: true, showParentInTwoColumns: true })).toMatchObject({ columns: 1, cardWidth,
         activeX: 0, minimumDepth: 0, maximumDepth: 0 });
     },
   );

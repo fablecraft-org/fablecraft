@@ -38,6 +38,28 @@ export function parentCardId(cards: CardRecord[], cardId: string) {
   return cards.find((card) => card.id === cardId)?.parentId ?? null;
 }
 
+export function navigationBoundaryCardId(
+  cards: CardRecord[],
+  cardId: string,
+  direction: "up" | "down" | "left",
+) {
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  let current = byId.get(cardId);
+  if (!current) return null;
+  if (direction !== "left") {
+    const siblings = sortedChildren(cards, current.parentId);
+    return siblings[direction === "up" ? 0 : siblings.length - 1]?.id ?? null;
+  }
+  const visited = new Set<string>();
+  while (current.parentId !== null) {
+    if (visited.has(current.id)) return null;
+    visited.add(current.id);
+    current = byId.get(current.parentId);
+    if (!current) return null;
+  }
+  return current.id;
+}
+
 export function firstChildCardId(cards: CardRecord[], cardId: string) {
   return sortedChildren(cards, cardId)[0]?.id ?? null;
 }

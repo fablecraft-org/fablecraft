@@ -1,36 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { z } from "zod";
-import type { DocumentSummary, FablecraftError } from "../types/document";
-
-const documentSummarySchema = z.object({
-  documentId: z.string().min(1),
-  name: z.string().min(1),
-  openedAtMs: z.number().int().nonnegative(),
-  path: z.string().min(1),
-});
-
-function normalizeError(error: unknown): FablecraftError {
-  if (
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    "message" in error
-  ) {
-    const maybeError = error as Partial<FablecraftError>;
-
-    return {
-      code: maybeError.code ?? "unknown_error",
-      message: maybeError.message ?? "Unknown error",
-      details: maybeError.details ?? null,
-    };
-  }
-
-  return {
-    code: "unknown_error",
-    message: error instanceof Error ? error.message : "Unknown error",
-    details: null,
-  };
-}
+import type { DocumentSummary } from "../types/document";
+import { documentIdentitySchema, normalizeError } from "./documentResponse";
 
 async function invokeDocumentCommand(
   command: "create_document" | "open_document",
@@ -38,7 +8,7 @@ async function invokeDocumentCommand(
 ): Promise<DocumentSummary> {
   try {
     const payload = await invoke(command, { path });
-    return documentSummarySchema.parse(payload);
+    return documentIdentitySchema.parse(payload);
   } catch (error) {
     throw normalizeError(error);
   }

@@ -19,6 +19,8 @@ const MAX_MCP_ARGUMENT_BYTES: usize = 16 * 1024;
 const MAX_MCP_PAYLOAD_BYTES: usize = 128 * 1024;
 const TOOL_GET_OPEN_DOCUMENTS: &str = "fablecraft_get_open_documents";
 const TOOL_GET_DOCUMENT: &str = "fablecraft_get_document";
+const TOOL_GET_MANUSCRIPT: &str = "fablecraft_get_manuscript";
+const TOOL_EDIT_MANUSCRIPT: &str = "fablecraft_edit_manuscript";
 const TOOL_GET_CARD: &str = "fablecraft_get_card";
 const TOOL_GET_SUBTREE: &str = "fablecraft_get_subtree";
 const TOOL_SET_CARD_TEXT: &str = "fablecraft_set_card_text";
@@ -56,6 +58,15 @@ pub struct McpToolResponse {
     pub snapshot: Option<DocumentSnapshot>,
     pub summary: String,
     pub tool_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EditManuscriptArgs {
+    base_revision_id: String,
+    from: usize,
+    to: usize,
+    insert: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +118,20 @@ pub fn list_mcp_tools() -> Vec<McpToolDefinition> {
             input_example: "{\n  \"documentPath\": \"/path/to/story.fable\"\n}".to_string(),
             is_mutation: false,
             name: TOOL_GET_DOCUMENT.to_string(),
+            scope: "document".to_string(),
+        },
+        McpToolDefinition {
+            description: "Read manuscript rich text, passages and the revision ID for edits.".to_string(),
+            input_example: r#"{"documentPath":"/path/to/story.fable"}"#.to_string(),
+            is_mutation: false,
+            name: TOOL_GET_MANUSCRIPT.to_string(),
+            scope: "document".to_string(),
+        },
+        McpToolDefinition {
+            description: "Replace a UTF-16 ProseMirror range within a textblock or at sibling block boundaries. Supply the base revision and closed rich JSON nodes to insert.".to_string(),
+            input_example: r#"{"documentPath":"/path/to/story.fable","baseRevisionId":"revision-id","from":1,"to":1,"insert":[{"type":"text","text":"New prose"}]}"#.to_string(),
+            is_mutation: true,
+            name: TOOL_EDIT_MANUSCRIPT.to_string(),
             scope: "document".to_string(),
         },
         McpToolDefinition {
@@ -199,16 +224,15 @@ pub fn list_mcp_tools() -> Vec<McpToolDefinition> {
 }
 
 #[tauri::command]
-pub fn invoke_mcp_tool(
+pub async fn invoke_mcp_tool(
     request: McpToolRequest,
     state: State<'_, AppState>,
 ) -> Result<McpToolResponse, AppErrorPayload> {
-    if let Some((path, normalized_request)) = external_style_request(request.clone())? {
-        return invoke_mcp_tool_inner(path, normalized_request).map_err(AppErrorPayload::from);
-    }
-
-    let path = current_document_path(&state)?;
-    invoke_mcp_tool_for_path(path, request)
+    let (path, request) = match external_style_request(request.clone())? {
+        Some((path, normalized_request)) => (path, normalized_request),
+        None => (current_document_path(&state)?, request),
+    };
+    crate::commands::document_worker(move || invoke_mcp_tool_for_path(path, request)).await
 }
 
 pub fn invoke_mcp_tool_for_path(
@@ -236,10 +260,12 @@ fn invoke_mcp_tool_inner(path: PathBuf, request: McpToolRequest) -> AppResult<Mc
 
     let snapshot = repository_result(DocumentRepository::load(path.clone()))?;
 
-    let response = match normalize_tool_name(request.tool_name.as_str()) {
+    let mut response = match normalize_tool_name(request.tool_name.as_str()) {
         TOOL_GET_OPEN_DOCUMENTS => get_open_documents(request),
         TOOL_GET_DOCUMENT => read_document(snapshot, request),
         TOOL_GET_CARD => read_card(snapshot, request),
+        TOOL_GET_MANUSCRIPT => read_manuscript(snapshot, request),
+        TOOL_EDIT_MANUSCRIPT => edit_manuscript(path, snapshot, request),
         TOOL_GET_SUBTREE => read_subtree(snapshot, request),
         TOOL_SET_CARD_TEXT => mutate_card_text(path, snapshot, request),
         TOOL_CREATE_CHILD => create_child(path, snapshot, request),
@@ -254,6 +280,14 @@ fn invoke_mcp_tool_inner(path: PathBuf, request: McpToolRequest) -> AppResult<Mc
         )),
     }?;
 
+    // A write has already committed. Omit an oversized snapshot rather than
+    // returning a failure that would invite the caller to repeat the write.
+    if response.snapshot.is_some() && enforce_payload_limit(&response).is_err() {
+        response.snapshot = None;
+        if response.result_json.len() > MAX_MCP_PAYLOAD_BYTES / 3 {
+            response.result_json = r#"{"committed":true}"#.to_string();
+        }
+    }
     enforce_payload_limit(&response)?;
 
     Ok(response)
@@ -263,6 +297,8 @@ fn normalize_tool_name(tool_name: &str) -> &str {
     match tool_name {
         "fablecraft.get_open_documents" => TOOL_GET_OPEN_DOCUMENTS,
         "fablecraft.get_document" => TOOL_GET_DOCUMENT,
+        "fablecraft.get_manuscript" => TOOL_GET_MANUSCRIPT,
+        "fablecraft.edit_manuscript" => TOOL_EDIT_MANUSCRIPT,
         "fablecraft.get_card" => TOOL_GET_CARD,
         "fablecraft.get_subtree" => TOOL_GET_SUBTREE,
         "fablecraft.set_card_text" => TOOL_SET_CARD_TEXT,
@@ -319,6 +355,8 @@ fn read_document(
         "rootCardId": root_card_id,
         "cardCount": snapshot.cards.len(),
         "treeDepthCounts": tree_depth_counts(&snapshot),
+        "hasManuscript": snapshot.manuscript.is_some(),
+        "revisionId": snapshot.revisions.first().map(|revision| &revision.id),
     });
 
     Ok(McpToolResponse {
@@ -326,6 +364,47 @@ fn read_document(
         scope: request.scope,
         snapshot: None,
         summary: "Loaded document metadata.".to_string(),
+        tool_name: request.tool_name,
+    })
+}
+
+fn read_manuscript(snapshot: DocumentSnapshot, request: McpToolRequest) -> AppResult<McpToolResponse> {
+    let payload = json!({
+        "revisionId": snapshot.revisions.first().map(|revision| &revision.id),
+        "manuscript": snapshot.manuscript,
+    });
+    Ok(McpToolResponse {
+        result_json: serialize_result(&payload)?,
+        scope: request.scope,
+        snapshot: None,
+        summary: "Loaded manuscript.".to_string(),
+        tool_name: request.tool_name,
+    })
+}
+
+fn edit_manuscript(
+    path: PathBuf,
+    snapshot: DocumentSnapshot,
+    request: McpToolRequest,
+) -> AppResult<McpToolResponse> {
+    let args: EditManuscriptArgs = parse_arguments(request.arguments_json)?;
+    if snapshot.revisions.first().map(|rev| rev.id.as_str()) != Some(&args.base_revision_id) {
+        return Err(AppError::conflict(
+            "stale_document_revision",
+            "Read the current manuscript revision before editing its ranges.",
+        ));
+    }
+    let mut editable = editable_snapshot(&snapshot);
+    let prose = editable.manuscript.as_mut().ok_or_else(|| {
+        AppError::not_found("manuscript_missing", "This document has no manuscript.")
+    })?;
+    crate::storage::manuscript::edit(prose, args.from, args.to, &args.insert)?;
+    let result = repository_result(DocumentRepository::save(path, editable))?;
+    Ok(McpToolResponse {
+        result_json: serialize_result(&json!({ "revisionId": result.revision_id }))?,
+        scope: request.scope,
+        snapshot: None,
+        summary: "Saved manuscript edit.".to_string(),
         tool_name: request.tool_name,
     })
 }
@@ -409,6 +488,7 @@ fn mutate_card_text(
     let next_snapshot = DocumentSnapshot {
         cards: snapshot.cards.clone(),
         contents: next_contents,
+        manuscript: snapshot.manuscript.clone(),
         revisions: snapshot.revisions.clone(),
         summary: snapshot.summary.clone(),
     };
@@ -630,11 +710,11 @@ fn save_and_reload(path: PathBuf, snapshot: DocumentSnapshot) -> AppResult<Docum
 }
 
 fn editable_snapshot(snapshot: &DocumentSnapshot) -> EditableDocumentSnapshot {
-    EditableDocumentSnapshot {
-        cards: snapshot.cards.clone(),
-        contents: snapshot.contents.clone(),
-        document_id: snapshot.summary.document_id.clone(),
+    let mut editable = EditableDocumentSnapshot::from(snapshot);
+    if let Some(prose) = &mut editable.manuscript {
+        crate::storage::manuscript::retain_targets(prose, &editable.cards);
     }
+    editable
 }
 
 fn create_card_record(
@@ -678,6 +758,7 @@ fn create_child_snapshot(
     Ok(DocumentSnapshot {
         cards: sort_cards(next_cards),
         contents: sort_contents(next_contents),
+        manuscript: snapshot.manuscript.clone(),
         revisions: snapshot.revisions.clone(),
         summary: snapshot.summary.clone(),
     })
@@ -747,6 +828,7 @@ fn create_sibling_snapshot(
     Ok(DocumentSnapshot {
         cards: sort_cards(next_cards),
         contents: sort_contents(next_contents),
+        manuscript: snapshot.manuscript.clone(),
         revisions: snapshot.revisions.clone(),
         summary: snapshot.summary.clone(),
     })
@@ -848,6 +930,7 @@ fn move_card_snapshot(
     Ok(DocumentSnapshot {
         cards: sort_cards(next_cards),
         contents: snapshot.contents.clone(),
+        manuscript: snapshot.manuscript.clone(),
         revisions: snapshot.revisions.clone(),
         summary: snapshot.summary.clone(),
     })
@@ -1009,6 +1092,7 @@ fn wrap_cards_in_parent_snapshot(
     Ok(DocumentSnapshot {
         cards: sort_cards(next_cards),
         contents: sort_contents(next_contents),
+        manuscript: snapshot.manuscript.clone(),
         revisions: snapshot.revisions.clone(),
         summary: snapshot.summary.clone(),
     })
@@ -1059,6 +1143,7 @@ fn delete_card_subtree_snapshot(
     Ok(DocumentSnapshot {
         cards: sort_cards(next_cards),
         contents: sort_contents(next_contents),
+        manuscript: snapshot.manuscript.clone(),
         revisions: snapshot.revisions.clone(),
         summary: snapshot.summary.clone(),
     })
@@ -1150,7 +1235,7 @@ fn scoped_request_fields(
     arguments: &mut Map<String, Value>,
 ) -> Result<(&'static str, Option<String>), AppErrorPayload> {
     match tool_name {
-        TOOL_GET_DOCUMENT => Ok(("document", None)),
+        TOOL_GET_DOCUMENT | TOOL_GET_MANUSCRIPT | TOOL_EDIT_MANUSCRIPT => Ok(("document", None)),
         TOOL_GET_CARD | TOOL_SET_CARD_TEXT => Ok((
             "card",
             Some(extract_required_argument_string(arguments, "cardId")?),
@@ -1206,7 +1291,11 @@ fn extract_required_argument_string(
 
 fn repository_result<T>(result: Result<T, AppErrorPayload>) -> AppResult<T> {
     result.map_err(|payload| {
-        AppError::storage("mcp_repository_error", payload.message, payload.details)
+        if payload.code == "stale_document_revision" {
+            AppError::conflict("stale_document_revision", payload.message)
+        } else {
+            AppError::storage("mcp_repository_error", payload.message, payload.details)
+        }
     })
 }
 
@@ -1598,6 +1687,54 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn manuscript_edits_and_card_mutations_share_revision_and_passage_integrity() {
+        let path = temp_document_path("live-manuscript");
+        DocumentRepository::create(path.clone()).unwrap();
+        let initial = DocumentRepository::load(path.clone()).unwrap();
+        let root = initial.cards[0].id.clone();
+        let mut draft = editable_snapshot(&initial);
+        let passage_id = Uuid::new_v4().to_string();
+        let child = create_card_record(&initial, &Uuid::new_v4().to_string(), Some(root.clone()), 0);
+        let child_id = child.id.clone();
+        draft.cards.push(child);
+        draft.contents.push(CardContentRecord { card_id: child_id.clone(), content_json: EMPTY_EDITOR_DOCUMENT.to_string() });
+        draft.manuscript = Some(crate::storage::manuscript::Manuscript {
+            id: Uuid::new_v4().to_string(),
+            content_json: content_json_for_plain_text("one 😀 two").unwrap(),
+            passages: vec![crate::storage::manuscript::Passage {
+                id: passage_id.clone(), from: 5, to: 7, target_card_ids: vec![root.clone()],
+            }, crate::storage::manuscript::Passage {
+                id: Uuid::new_v4().to_string(), from: 8, to: 11, target_card_ids: vec![child_id.clone()],
+            }],
+        });
+        let local = DocumentRepository::save(path.clone(), draft).unwrap();
+        let request = |tool: &str, args: Value| McpToolRequest {
+            scope: "document".to_string(), card_id: None, tool_name: tool.to_string(),
+            arguments_json: Some(args.to_string()),
+        };
+        let edit = request(TOOL_EDIT_MANUSCRIPT, json!({
+            "baseRevisionId": local.revision_id, "from": 5, "to": 7,
+            "insert": [{"type":"text", "text":"updated", "marks":[{"type":"bold"}]}],
+        }));
+        let edited = invoke_mcp_tool_inner(path.clone(), edit.clone()).unwrap();
+        let payload: Value = serde_json::from_str(&edited.result_json).unwrap();
+        assert_ne!(payload["revisionId"], local.revision_id);
+        let stale = invoke_mcp_tool_inner(path.clone(), edit).unwrap_err();
+        assert_eq!(stale.to_payload().code, "stale_document_revision");
+
+        let mut delete = request(TOOL_DELETE_CARD, json!({}));
+        delete.card_id = Some(child_id);
+        invoke_mcp_tool_inner(path.clone(), delete).unwrap();
+        let loaded = DocumentRepository::load(path.clone()).unwrap().manuscript.unwrap();
+        assert!(loaded.content_json.contains("\"bold\""));
+        assert_eq!(loaded.passages[0].id, passage_id);
+        assert_eq!((loaded.passages[0].from, loaded.passages[0].to), (5, 12));
+        assert_eq!(loaded.passages[0].target_card_ids, vec![root]);
+        fs::remove_file(path).unwrap();
+    }
+
+
     fn temp_document_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!("fablecraft-mcp-{label}-{}.fable", Uuid::new_v4()))
     }
@@ -1680,6 +1817,7 @@ mod tests {
                         .expect("content should serialize"),
                 },
             ],
+            manuscript: snapshot.manuscript.clone(),
             revisions: snapshot.revisions.clone(),
             summary: snapshot.summary.clone(),
         };
@@ -2129,6 +2267,7 @@ mod tests {
                         .expect("content should serialize"),
                 },
             ],
+            manuscript: snapshot.manuscript.clone(),
             revisions: snapshot.revisions.clone(),
             summary: snapshot.summary.clone(),
         };
@@ -2279,6 +2418,7 @@ mod tests {
                         .expect("content should serialize"),
                 },
             ],
+            manuscript: snapshot.manuscript.clone(),
             revisions: snapshot.revisions.clone(),
             summary: snapshot.summary.clone(),
         };

@@ -252,7 +252,7 @@ function hexColorToRgb(hexColor: string): [number, number, number] {
   ];
 }
 
-function isMacOs() {
+export function isMacOs() {
   if (typeof navigator === "undefined") {
     return false;
   }

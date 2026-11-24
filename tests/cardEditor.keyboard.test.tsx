@@ -200,7 +200,7 @@ describe("CardEditor keyboard behavior", () => {
     await act(async () => { root.unmount(); });
   });
 
-  it.each(["shortcut", "tab", "native-menu"])("creates an anchored selection through %s without separately saving the source mark", async (trigger) => {
+  it.each(["tab", "native-menu"])("creates an anchored selection through %s without separately saving the source mark", async (trigger) => {
     const onCreateAnchoredChild = vi.fn();
     const { container, props, root } = renderEditor({ onCreateAnchoredChild });
     await act(async () => { root.render(<CardEditor {...props} />); });
@@ -215,8 +215,7 @@ describe("CardEditor keyboard behavior", () => {
       if (trigger === "tab") element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
       element.dispatchEvent(new KeyboardEvent("keydown", {
         bubbles: true, cancelable: true,
-        key: trigger === "tab" ? "ArrowRight" : "µ", code: trigger === "tab" ? "ArrowRight" : "KeyM",
-        metaKey: trigger === "shortcut", altKey: trigger === "shortcut",
+        key: "ArrowRight",
       }));
     });
     expect(onCreateAnchoredChild).toHaveBeenCalledTimes(1);
@@ -232,6 +231,20 @@ describe("CardEditor keyboard behavior", () => {
     await act(async () => { root.unmount(); });
   });
 
+  it.each(["metaKey", "ctrlKey"])("does not create a passage child with the removed %s+Alt+M shortcut", async (modifier) => {
+    const onCreateAnchoredChild = vi.fn();
+    const { container, props, root } = renderEditor({ onCreateAnchoredChild });
+    await act(async () => { root.render(<CardEditor {...props} />); });
+    const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
+    await act(async () => {
+      element.editor.commands.setTextSelection({ from: 1, to: 6 });
+      element.dispatchEvent(new KeyboardEvent("keydown", { key: "m", code: "KeyM", [modifier]: true, altKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(onCreateAnchoredChild).not.toHaveBeenCalled();
+    expect(props.onCreateChild).not.toHaveBeenCalled();
+    await act(async () => { root.unmount(); });
+  });
+
   it("renders persistent anchors, opens their target and rejects overlapping selection", async () => {
     const contentJson = JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [
       { type: "text", text: "Hello", marks: [{ type: "passageAnchor", attrs: { childCardId: "child" } }] },
@@ -243,9 +256,7 @@ describe("CardEditor keyboard behavior", () => {
     const { container, props, root } = renderEditor({ contentJson, onOpenAnchoredChild, onPassageAnchorError, onCreateAnchoredChild });
     await act(async () => { root.render(<CardEditor {...props} />); });
     const element = container.querySelector(".ProseMirror") as HTMLElement & { editor: Editor };
-    const command = () => element.dispatchEvent(new KeyboardEvent("keydown", {
-      bubbles: true, cancelable: true, code: "KeyM", key: "m", metaKey: true, altKey: true,
-    }));
+    const command = () => dispatchNativeMenuAction("create-anchored-child");
     expect(element.querySelector(".fc-passage-anchor")?.textContent).toBe("Hello");
     await act(async () => { element.editor.commands.setTextSelection(3); });
     expect(element.querySelector(".fc-passage-anchor-active")?.textContent).toBe("Hello");
@@ -373,7 +384,9 @@ describe("CardEditor keyboard behavior", () => {
     });
   });
 
-  it("lets Cmd+ArrowRight keep its native editor behavior", async () => {
+  it.each(["metaKey", "ctrlKey"].flatMap(modifier =>
+    ["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"].map(key => [modifier, key]),
+  ))("keeps %s + %s in the editor without creating or navigating cards", async (modifier, key) => {
     const { container, props, root } = renderEditor();
 
     await act(async () => {
@@ -387,16 +400,18 @@ describe("CardEditor keyboard behavior", () => {
     const event = new KeyboardEvent("keydown", {
       bubbles: true,
       cancelable: true,
-      key: "ArrowRight",
-      metaKey: true,
+      key,
+      [modifier]: true,
     });
 
     await act(async () => {
       editorElement?.dispatchEvent(event);
     });
 
-    expect(event.defaultPrevented).toBe(false);
-    expect(props.onCreateChild).not.toHaveBeenCalled();
+    for (const callback of [props.onCreateChild, props.onCreateSiblingAbove, props.onCreateSiblingBelow,
+      props.onCreateParentLevel, props.onNavigateAbove, props.onNavigateBelow, props.onNavigateChild, props.onNavigateParent]) {
+      expect(callback).not.toHaveBeenCalled();
+    }
 
     await act(async () => {
       root.unmount();

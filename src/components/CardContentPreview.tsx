@@ -1,11 +1,13 @@
 import { Fragment, type ReactNode } from "react";
 import { contentText } from "../domain/document/content";
+import { historyAddedClass, type HistoryTextRange } from "./historyAdditions";
 
 interface AnchorPresentation {
   cardLabels?: Record<string, string>;
   onOpenCardLink?: (cardId: string) => void;
   activeAnchoredChildId?: string;
   onOpenAnchoredChild?: (childId: string) => void;
+  historyAdditions?: readonly HistoryTextRange[];
 }
 
 interface PreviewMark {
@@ -89,11 +91,34 @@ function applyMarks(content: ReactNode, marks: PreviewMark[], anchors: AnchorPre
   }, content);
 }
 
-function renderChildren(nodes: PreviewNode[], keyPrefix: string, anchors: AnchorPresentation) {
-  return nodes.map((node, index) => renderNode(node, `${keyPrefix}-${index}`, anchors));
+function nodeSize(node: PreviewNode): number {
+  if (node.type === "text") return node.text?.length ?? 0;
+  if (node.type === "cardLink" || node.type === "hardBreak" || node.type === "horizontalRule") return 1;
+  return 2 + (node.content ?? []).reduce((size, child) => size + nodeSize(child), 0);
 }
 
-function renderNode(node: PreviewNode, key: string, anchors: AnchorPresentation): ReactNode {
+function renderChildren(nodes: PreviewNode[], keyPrefix: string, anchors: AnchorPresentation, position: number) {
+  return nodes.map((node, index) => {
+    const content = renderNode(node, `${keyPrefix}-${index}`, anchors, position);
+    if (anchors.historyAdditions) position += nodeSize(node);
+    return content;
+  });
+}
+
+function renderAddedText(text: string, position: number, ranges: readonly HistoryTextRange[] = []): ReactNode {
+  const parts: ReactNode[] = [];
+  let offset = 0;
+  for (const { from, to } of ranges) {
+    const start = Math.max(offset, from - position);
+    const end = Math.min(text.length, to - position);
+    if (start >= end) continue;
+    parts.push(text.slice(offset, start), <span className={historyAddedClass} key={start}>{text.slice(start, end)}</span>);
+    offset = end;
+  }
+  return parts.length ? [...parts, text.slice(offset)] : text;
+}
+
+function renderNode(node: PreviewNode, key: string, anchors: AnchorPresentation, position: number): ReactNode {
   if (node.type === "cardLink") {
     const id = String(node.attrs?.targetCardId ?? "");
     const label = anchors.cardLabels?.[id];
@@ -113,7 +138,7 @@ function renderNode(node: PreviewNode, key: string, anchors: AnchorPresentation)
   if (node.type === "text") {
     return (
       <Fragment key={key}>
-        {applyMarks(node.text ?? "", node.marks ?? [], anchors)}
+        {applyMarks(renderAddedText(node.text ?? "", position, anchors.historyAdditions), node.marks ?? [], anchors)}
       </Fragment>
     );
   }
@@ -122,7 +147,7 @@ function renderNode(node: PreviewNode, key: string, anchors: AnchorPresentation)
     return <br key={key} />;
   }
 
-  const children = renderChildren(node.content ?? [], key, anchors);
+  const children = renderChildren(node.content ?? [], key, anchors, position + Number(node.type !== "doc"));
 
   if (node.type === "doc") {
     return <Fragment key={key}>{children}</Fragment>;
@@ -211,6 +236,7 @@ export function CardContentPreview({
   placeholder = "",
   activeAnchoredChildId,
   onOpenAnchoredChild,
+  historyAdditions,
 }: CardContentPreviewProps) {
   const fallbackText = contentText(contentJson);
 
@@ -234,7 +260,7 @@ export function CardContentPreview({
 
   return (
     <div className="fc-editor fc-preview text-[length:var(--fc-content-size)] leading-[var(--fc-content-line-height)] text-[var(--fc-color-text)]">
-      {renderNode(previewDocument, "root", { activeAnchoredChildId, onOpenAnchoredChild, cardLabels, onOpenCardLink })}
+      {renderNode(previewDocument, "root", { activeAnchoredChildId, onOpenAnchoredChild, cardLabels, onOpenCardLink, historyAdditions }, 0)}
     </div>
   );
 }

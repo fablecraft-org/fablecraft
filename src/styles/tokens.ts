@@ -29,6 +29,12 @@ const themeTokens = {
     cardSurfaceActive: "#fdf6ef",
     cardSurfaceEditing: "#fdf6ef",
     focus: "#24262a",
+    historyAdded: "#286443",
+    historyAddedSurface: "#e1f2e5",
+    historyModified: "#8f4b17",
+    historyModifiedSurface: "#faead9",
+    historyRemoved: "#a33a43",
+    historyRemovedSurface: "#fbe6e7",
     muted: "#756c64",
     noticeBorder: "rgba(245, 238, 229, 0.18)",
     noticeSurface: "#18191b",
@@ -60,6 +66,12 @@ const themeTokens = {
     cardSurfaceActive: "#2d3035",
     cardSurfaceEditing: "#373b41",
     focus: "#f4f4f1",
+    historyAdded: "#8fdaa9",
+    historyAddedSurface: "#233b30",
+    historyModified: "#ffc28d",
+    historyModifiedSurface: "#453225",
+    historyRemoved: "#ff9ca7",
+    historyRemovedSurface: "#4d292e",
     muted: "#b7bbc1",
     noticeBorder: "rgba(24, 25, 27, 0.14)",
     noticeSurface: "#2d3035",
@@ -91,6 +103,12 @@ const themeTokens = {
   cardSurfaceActive: string;
   cardSurfaceEditing: string;
   focus: string;
+  historyAdded: string;
+  historyAddedSurface: string;
+  historyModified: string;
+  historyModifiedSurface: string;
+  historyRemoved: string;
+  historyRemovedSurface: string;
   muted: string;
   noticeBorder: string;
   noticeSurface: string;
@@ -159,6 +177,7 @@ const defaultUiPreferences: UiPreferences = {
 const uiTokens = {
   animationEasing: "cubic-bezier(0.2, 0.85, 0.3, 1)",
   animationMs: 140,
+  cardNavigationMs: 150,
   cardHeight: 84,
   directoryCardWidth: 468,
   cardLink: { fontSize: "0.75em", paddingX: 5, paddingY: 1, gap: 2 },
@@ -184,6 +203,7 @@ const uiTokens = {
     maxWidth: 520,
     padding: 16,
   },
+  windowDragHeight: 128,
   radius: {
     card: 6,
     pill: 999,
@@ -289,6 +309,12 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-color-card-surface-active": theme.cardSurfaceActive,
     "--fc-color-card-surface-editing": theme.cardSurfaceEditing,
     "--fc-color-focus": theme.focus,
+    "--fc-color-history-added": theme.historyAdded,
+    "--fc-color-history-added-surface": theme.historyAddedSurface,
+    "--fc-color-history-modified": theme.historyModified,
+    "--fc-color-history-modified-surface": theme.historyModifiedSurface,
+    "--fc-color-history-removed": theme.historyRemoved,
+    "--fc-color-history-removed-surface": theme.historyRemovedSurface,
     "--fc-color-muted": theme.muted,
     "--fc-color-notice-border": theme.noticeBorder,
     "--fc-color-notice-surface": theme.noticeSurface,
@@ -313,6 +339,7 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-document-title-height": `${uiTokens.documentTitle.height}px`,
     "--fc-document-title-max-width": `${uiTokens.documentTitle.maxWidth}px`,
     "--fc-document-title-padding": `${uiTokens.documentTitle.padding}px`,
+    "--fc-window-drag-height": `${uiTokens.windowDragHeight}px`,
     "--fc-radius-card": `${uiTokens.radius.card}px`,
     "--fc-radius-pill": `${uiTokens.radius.pill}px`,
     "--fc-shadow-card": theme.shadowCard,
@@ -331,3 +358,23 @@ export function applyUiTokens(preferences: UiPreferences = defaultUiPreferences)
 }
 
 export { defaultUiPreferences, uiTokens };
+
+export const manuscriptLayoutTokens = {
+  proseMinimum: 360,
+  proseMaximum: 720,
+  controlGap: 8,
+  linkBarWidth: 4,
+  panePadding: 32,
+  touchPanePadding: 24,
+  topInset: 54,
+  dividerWidth: 9,
+  initialTreeRatio: 0.4,
+  dividerKeyboardStep: 24,
+};
+
+export const historyLayoutTokens = {
+  timelineWidth: 252,
+  narrowWidth: 800,
+  gap: 12,
+  padding: 16,
+} as const;

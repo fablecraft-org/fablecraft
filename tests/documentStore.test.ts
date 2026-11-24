@@ -136,7 +136,7 @@ describe("document store", () => {
     expect(state.snapshot?.revisions).toHaveLength(0);
   });
 
-  it("records save previews without recursively serializing previous revisions", () => {
+  it("records only metadata for saved revisions", () => {
     useDocumentStore.getState().hydrateSnapshot(makeDocumentSnapshot());
 
     useDocumentStore.getState().markSaved({
@@ -155,16 +155,14 @@ describe("document store", () => {
     });
 
     const revisions = useDocumentStore.getState().snapshot?.revisions ?? [];
-    const latestRevision = JSON.parse(revisions[0]?.snapshot ?? "{}");
 
-    expect(revisions).toHaveLength(2);
-    expect(latestRevision.documentId).toBe("doc-1");
-    expect(latestRevision).not.toHaveProperty("summary");
-    expect(latestRevision).not.toHaveProperty("revisions");
-    expect(revisions[0]?.snapshot).not.toContain("rev-1");
+    expect(revisions).toEqual([
+      { createdAtMs: 20, id: "rev-2" },
+      { createdAtMs: 10, id: "rev-1" },
+    ]);
   });
 
-  it("clears dirty local edits when an external snapshot arrives mid-edit", () => {
+  it("keeps dirty local edits when an external snapshot arrives mid-edit", () => {
     const initialSnapshot = makeDocumentSnapshot();
     useDocumentStore.getState().hydrateSnapshot(initialSnapshot);
 
@@ -187,22 +185,12 @@ describe("document store", () => {
 
     const state = useDocumentStore.getState();
 
-    expect(state.dirty).toBe(false);
-    expect(state.saveState).toBe("saved");
-    expect(
-      state.snapshot?.contents.find((content) => content.cardId === "card-a")?.contentJson,
-    ).not.toContain("Local unsaved change");
-    expect(
-      state.snapshot?.contents.find((content) => content.cardId === "card-b")?.contentJson,
-    ).toContain("Remote update to card-b");
-
-    useDocumentStore.getState().undoNavigation();
-
-    expect(
-      useDocumentStore
-        .getState()
-        .snapshot?.contents.find((content) => content.cardId === "card-a")?.contentJson,
-    ).toContain("Local unsaved change");
+    expect(state.dirty).toBe(true);
+    expect(state.saveState).toBe("idle");
+    expect(state.snapshot?.contents.find((content) => content.cardId === "card-a")?.contentJson)
+      .toContain("Local unsaved change");
+    expect(state.snapshot?.contents.find((content) => content.cardId === "card-b")?.contentJson)
+      .not.toContain("Remote update to card-b");
   });
 
   it("undos and redos editing history through snapshot updates", () => {

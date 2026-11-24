@@ -117,12 +117,13 @@ export function createCardCopyPayload(
   };
 }
 
-export function createCardCutPayload(
+function createCardSubtreePayload(
   snapshot: DocumentSnapshot,
   cardId: string,
+  operation: "copy" | "cut",
 ): CardSubtreeClipboardPayload {
   if (!cardById(snapshot, cardId)) {
-    throw new Error(`Unable to cut missing card ${cardId}.`);
+    throw new Error(`Unable to copy missing card ${cardId}.`);
   }
 
   return {
@@ -135,11 +136,19 @@ export function createCardCutPayload(
     })),
     format: "fablecraft.card",
     kind: "subtree",
-    operation: "cut",
+    operation,
     rootContentJson: cardContent(snapshot, cardId),
     source: sourceForCard(snapshot, cardId),
     version: 1,
   };
+}
+
+export function createCardCutPayload(snapshot: DocumentSnapshot, cardId: string) {
+  return createCardSubtreePayload(snapshot, cardId, "cut");
+}
+
+export function createCardSubtreeCopyPayload(snapshot: DocumentSnapshot, cardId: string) {
+  return createCardSubtreePayload(snapshot, cardId, "copy");
 }
 
 export function removeCutSubtree(
@@ -200,7 +209,8 @@ export function pasteCardClipboardPayloadWithResult(
 ): PasteCardClipboardResult {
   const targetHasContent = !isContentEffectivelyEmpty(cardContent(snapshot, targetCardId));
   const targetHasChildren = snapshot.cards.some((card) => card.parentId === targetCardId);
-  const shouldReplaceTarget = !targetHasContent && !targetHasChildren;
+  const copiedSubtree = payload.kind === "subtree" && payload.operation === "copy";
+  const shouldReplaceTarget = !copiedSubtree && !targetHasContent && !targetHasChildren;
   const pastedRootCardId = shouldReplaceTarget ? targetCardId : createCardId();
   const pasteTargetSnapshot = shouldReplaceTarget
     ? snapshot

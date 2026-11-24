@@ -1,9 +1,12 @@
-import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { CardContentPreview } from "./CardContentPreview";
 import { contentTitlePreview } from "../domain/document/content";
 import { CardIdentity } from "./CardIdentity";
+import type { HistoryTextRange } from "./historyAdditions";
 
 interface TreeCardButtonProps {
+  manuscriptTarget?: string;
+  manuscriptFooter?: ReactNode;
   cardLabels?: Record<string, string>;
   onOpenCardLink?: (cardId: string) => void;
   isReference?: boolean;
@@ -13,11 +16,13 @@ interface TreeCardButtonProps {
   borderColor: string;
   cardLabel?: string;
   contentJson: string;
+  historyAdditions?: readonly HistoryTextRange[];
   descendantCount?: number;
   activeAnchoredChildId?: string;
   onOpenAnchoredChild?: (childId: string) => void;
   placeholder?: string;
   isActive?: boolean;
+  paneActive?: boolean;
   onMeasureHeight?: (height: number) => void;
   onClick: () => void;
   cardWidth?: number;
@@ -29,16 +34,18 @@ interface TreeCardButtonProps {
 }
 
 export function TreeCardButton({
-  cardLabels, onOpenCardLink,
+  cardLabels, onOpenCardLink, manuscriptTarget, manuscriptFooter,
   isReference = false, appearanceId, onEdit, viewportTop,
   borderColor,
   cardLabel,
   contentJson,
+  historyAdditions,
   descendantCount = 0,
   activeAnchoredChildId,
   onOpenAnchoredChild,
   placeholder = "",
   isActive = false,
+  paneActive = true,
   onMeasureHeight,
   onClick,
   cardWidth,
@@ -52,10 +59,11 @@ export function TreeCardButton({
   const horizontalPadding = titleOnly ? 20 : isActive ? 33 : 34;
   const topPadding = titleOnly ? 18 : isActive ? 40 : 42;
   const bottomPadding = titleOnly ? 18 : isActive ? 23 : 24;
+  const showActiveStyle = isActive && paneActive;
   const renderedShadow = titleOnly
-    ? isActive ? "var(--fc-shadow-overview-card-active)" : "var(--fc-shadow-overview-card)"
-    : isActive ? "var(--fc-shadow-elevated)" : "none";
-  const renderedSurface = isActive
+    ? showActiveStyle ? "var(--fc-shadow-overview-card-active)" : "var(--fc-shadow-overview-card)"
+    : showActiveStyle ? "var(--fc-shadow-elevated)" : "none";
+  const renderedSurface = showActiveStyle
     ? "var(--fc-color-card-surface-active)"
     : "var(--fc-color-card-surface)";
 
@@ -89,6 +97,7 @@ export function TreeCardButton({
 
   return (
     <div
+      data-manuscript-target={manuscriptTarget}
       data-reference={isReference || undefined}
       data-appearance-id={appearanceId}
       className="absolute flex min-h-[var(--fc-card-height)] w-[var(--fc-card-width)] cursor-pointer flex-col justify-start border bg-[var(--fc-color-card-surface)] px-5 py-[10px] text-left transition duration-[var(--fc-animation-ms)] ease-[var(--fc-animation-easing)]"
@@ -130,8 +139,10 @@ export function TreeCardButton({
         </p>
       ) : (
         <CardContentPreview cardLabels={cardLabels} onOpenCardLink={onOpenCardLink} contentJson={contentJson} placeholder={placeholder}
+          historyAdditions={historyAdditions}
           activeAnchoredChildId={activeAnchoredChildId} onOpenAnchoredChild={onOpenAnchoredChild} />
       )}
+      {manuscriptFooter}
     </div>
   );
 }

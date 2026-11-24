@@ -100,7 +100,7 @@ Cards do NOT have titles.
 - Selecting a child folder and moving right or pressing Enter browses into that folder.
 - Folder preview children are real navigation targets: Right from a selected child folder moves to its remembered child folder or FABLE file (otherwise its first visible child) before entering/opening that child.
 - When a FABLE file is selected and it is the open document, Right moves into the document's remembered root card (otherwise its first root card).
-- Ctrl/Cmd+Right, Ctrl/Cmd+Up, or Ctrl/Cmd+Down in directory mode creates a new untitled `.fable` file and selects its explorer card with the name ready to edit. From a folder card it creates inside that folder; from a file or child-folder entry it creates beside that entry in its containing folder, including nested previews.
+- Tab+Right, Tab+Up, or Tab+Down in directory mode creates a new untitled `.fable` file and selects its explorer card with the name ready to edit. From a folder card it creates inside that folder; from a file or child-folder entry it creates beside that entry in its containing folder, including nested previews.
 - Creating a directory file keeps the existing document open in the background and stays in directory navigation. Enter confirms the new name; Escape or confirming an empty name keeps the generated `Untitled` name (or the next available numbered name). Right from the selected file opens it through the normal document-opening flow; creation alone does not enter the document.
 - Pressing Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Move "[file name]" and all its contents to Trash?` before moving the entire `.fable` file to the system Trash. It can be restored using the operating system until Trash is emptied; a Trash failure leaves the document open and never falls back to permanent deletion.
 - The delete confirmation dialog shows centered rounded-pill Cancel and Move to Trash actions only; arrow keys move the highlighted selection between them and Enter activates the highlighted action.
@@ -115,12 +115,12 @@ Cards do NOT have titles.
 
 ### 2.5 Passage-anchored Child Cards
 
-- In editing mode, select non-whitespace text and press Cmd/Ctrl+Alt+M (Option on macOS) or Tab+Right to create a child associated with that passage. Cmd+M retains the native Minimize action.
-- The native Card menu exposes the same action as `Create Child from Passage`, with Cmd/Ctrl+Alt+M as its accelerator.
+- In editing mode, select non-whitespace text and press Tab+Right to create a child associated with that passage. Cmd+M retains the native Minimize action.
+- The native Card menu exposes the same action as `Create Child from Passage`, without a Cmd/Ctrl accelerator.
 - The new card is an ordinary child appended after all existing direct children. It immediately receives editing focus and follows normal card-column positioning; it is not aligned to the passage's line.
 - The passage keeps a persistent muted grey highlight, including in parent/preview cards. Its highlight becomes bright yellow when its associated child is selected or the editing selection/caret is inside that passage. Active yellow highlights use dark text in both themes.
 - Clicking a highlighted passage opens its specific child in editing mode, using normal centering with the source parent visible to its left. The association uses the child id, so same-parent reordering never changes the target. It also updates the remembered child for horizontal return navigation.
-- Each passage has one associated direct child. A card may contain multiple separate anchored passages. Overlapping associations are rejected with a notice; invoking the command within an existing passage opens its child rather than making a duplicate. With no selection, Tab+Right keeps its existing behavior; Cmd/Ctrl+Alt+M opens an anchor at the caret or does nothing.
+- Each passage has one associated direct child. A card may contain multiple separate anchored passages. Overlapping associations are rejected with a notice; invoking the command within an existing passage opens its child rather than making a duplicate. With no selection, Tab+Right keeps its existing child-creation behavior. The native passage action opens an anchor at the caret or does nothing.
 - Passage creation supports prose, including headings and lists. Selections containing inline code or code blocks are rejected with a notice because those formats exclude highlight marks; no child is created and formatting is preserved.
 - Text edits within a passage retain its association. Deleting all anchored text leaves the child as an ordinary unanchored card. Deleting the child (including abandoning an empty child), or moving it to a different parent, removes the highlight without deleting source text.
 - Creation of the child and the source highlight is one editing undo/redo operation. Existing snapshot history, autosave, reopen, and descendant badges include anchored children normally.
@@ -201,6 +201,10 @@ navigation | editing | search | command
 
 - Left → parent
 - Right → last visited child during horizontal navigation, otherwise first child
+- Cmd/Ctrl+Up / Down → first / last sibling sharing the selected appearance’s parent, including roots as one sibling set
+- Cmd/Ctrl+Left → root card of the selected appearance’s branch; at a root, stay on that card rather than entering the directory
+- Cmd/Ctrl+Right does not create or navigate cards. Cmd/Ctrl+Arrow retains native text-navigation/selection behavior in editing mode.
+- A root jump remembers each traversed child so subsequent Right navigation can retrace the full path. Vertical jumps clear child memory when selection changes; repeated boundary jumps preserve it. Directory Cmd/Ctrl+Up / Down selects the first / last entry in the current set.
 - Up → previous card in the current column
 - Down → next card in the current column
 - From a root card, Left moves to the current `.fable` document context card, then to its containing folder.
@@ -217,10 +221,11 @@ Up/down follows the packed spatial column, even across different parent groups. 
 
 ### Creation
 
+- Tab+Arrow is the sole modifier-based card-creation shortcut in navigation and editing modes. Native Card menu actions remain available without Cmd/Ctrl creation accelerators.
 - In navigation and editing modes, Tab+Up / Down → new sibling above/below
 - In navigation and editing modes, Tab+Right → new last child; in editing mode with selected text, create a passage-anchored child
 - In navigation and editing modes, Tab+Left → wrap the current level in a new parent
-- In directory navigation, Ctrl/Cmd+Right, Ctrl/Cmd+Up, or Ctrl/Cmd+Down creates a new `.fable` file inside the selected folder or beside a selected child entry, starts inline naming, and waits for Right to open it.
+- In directory navigation, Tab+Right, Tab+Up, or Tab+Down creates a new `.fable` file inside the selected folder or beside a selected child entry, starts inline naming, and waits for Right to open it.
 - Newly generated siblings, children, parents, and the first card in a new document all default to normal paragraph text.
 
 ### Clipboard
@@ -272,14 +277,15 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - workspace renders as a bounded stage that fills the window
 - stage background matches the card surface exactly
 - on macOS, the native traffic-light title bar overlays the app content so it uses the exact same light/dark background as the workspace
-- the top drag region spans the upper 128px of the window so the overlay title area is easy to grab
+- the top drag region spans the upper 128px of the window in Tree. In Manuscript and Both, dragging is confined to the title strip so writers can click and select prose at the top of the manuscript, including after scrolling
 - Active card: vertically centered when it fits; horizontally positioned within the responsive column arrangement described below
 - arrow-key navigation recenters the selected card and should not be immediately displaced by residual trackpad pan momentum
+- When selection moves in navigation mode, visible cards that remain in view slide into their new positions over 150 ms. Wide Lens connectors move with their cards. Selection responds immediately, and the system Reduce Motion setting skips the slide.
 - Parents: left-middle column
 - Children: right column
 - Siblings: above and below the active card
-- Normal writing columns depend on available window width: one = active card and siblings; two = active card and siblings, children; three = immediate parent, active card and siblings, children; four = immediate parent, active card and siblings, children, grandchildren. Ancestors beyond the visible parent column and other branches stay hidden. Overview continues to show the whole tree.
-- The visible columns fill the window with equal card widths, fixed 24px gaps and 24px outer margins. Cards shrink until a 360px minimum reading width is reached, then the layout drops a column. Column transitions occur at 792px, 1176px, and 1560px of available workspace width; four is the maximum. In two/four columns the active card sits left of the window center. Missing tree levels retain their column space so selection does not change width.
+- Normal writing columns depend on available window width: one = active card and siblings; two = active card and siblings, children; three = immediate parent, active card and siblings, children; four = immediate parent, active card and siblings, children, grandchildren. When entering a sibling group at a leaf with two columns, show its parent on the left and the sibling group on the right. Moving between siblings preserves the group's current column regardless of whether the selected sibling has children. Ancestors beyond the visible parent column and other branches stay hidden. Overview continues to show the whole tree.
+- The visible columns fill the window with equal card widths, fixed 24px gaps and 24px outer margins. Cards shrink until a 360px minimum reading width is reached, then the layout drops a column. Column transitions occur at 792px, 1176px, and 1560px of available workspace width; four is the maximum. In four columns the active card sits left of the window center. Visible levels retain their allotted space so selection does not change card width.
 - The desktop window minimum size is 408 × 320 logical pixels. Directory cards retain their existing fixed sizing and arrangement; overview retains its fixed-size graph. The manual card-width setting is removed; legacy saved width preferences are ignored.
 - Wide Lens is the zoomed-out structural overview: compact, fixed-size title-only card shells at a fixed zoom level. Every card has a soft shadow matching the writing-card shadow style, with no outline. The selected card uses the same shadow geometry with greater darkness, complementing the darker selected graph lines. Wide Lens shadows are visible in both light and dark themes. Hide descendant-count badges in Wide Lens, retaining card numbers and reference indicators.
 - overview title shells are wide enough for short titles and may wrap title text across two lines
@@ -309,7 +315,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - Without a remembered child, center the child group’s complete height (including gaps) on its parent. Clamp its top to the usable top edge if the group would extend above it; excess cards overflow below. A single child follows the same centering rule. Grandchild groups follow these rules, with neighboring groups displaced outward when needed to avoid overlap and preserve order.
 - The underlying spatial layout retains hidden branches for column navigation: first children of other parent groups prefer their parent's top-aligned slot, with later children stacked below, while avoiding the active child group or reserved empty child slot. Visibility filtering does not change tree order or keyboard destinations.
 - anchoring the active child group must not reorder neighboring sibling subtrees in that same child column
-- when the active card has no children, the child column shows no writing cards and retains a full empty child-creation slot centered on the active card
+- when the layout includes the child column and the active card has no children, the child column shows no writing cards and retains a full empty child-creation slot centered on the active card
 - that empty child slot matches the selected card footprint but stays visually invisible against the workspace background while remaining clickable for first-child creation
 - no helper copy, mode labels, or structural labels outside cards
 
@@ -321,7 +327,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 ### Visibility
 
 - show as much as fits
-- prioritize the active column, then children, then parent context, then grandchildren as the window widens
+- prioritize the active column, then children, then parent context, then grandchildren as the window widens. A two-column view can use the left column for the parent as described above.
 - cards may be partially off-screen
 
 ### Card Size
@@ -401,7 +407,7 @@ Document:
 - Open Recent
 - Import Markdown
 - Export Level (MD / HTML)
-- Convert Card to Document
+- New Document From Tree
 
 Structure:
 
@@ -583,9 +589,10 @@ Export:
 - export filename defaults to the document name
 - markdown and html outputs separate cards with clear level separators
 
-Card conversion:
+New document from tree:
 
-- Convert Card to Document opens a save dialog like New Document, creates a new `.fable` document from the selected card and all descendants, removes that subtree from the source document, keeps the source valid by clearing the final root card when necessary, then opens the new document.
+- New Document From Tree opens the standard document save dialog with a filename suggested from the selected card. The selected card becomes the root of the new `.fable` document, and all descendants move with it in their original hierarchy and sibling order.
+- Once the new tree is saved, the command removes it from the source document and opens the new document. If the selected card was the source's only root, the source keeps an empty root card.
 
 ---
 
@@ -672,7 +679,7 @@ Rules:
 - no mandatory account for local writing
 - no collaboration
 - no plugins
-- same-document inline card links, derived reference children, and passage-anchored direct children are supported as defined in §2.5–2.7; cross-document links remain outside scope
+- same-document inline card links, derived reference children, and passage-anchored direct children are supported as defined in §2.5–2.7. Manuscript-to-card links are defined in §20. Cross-document links remain outside scope
 - no multi-select
 - no sync in the current MVP
 - no hosted AI connector accounts in the current MVP
@@ -727,3 +734,29 @@ Editing behavior:
 - On macOS, if the native Trash operation fails, Fablecraft asks Finder to move the document to Trash. This fallback may prompt for permission to control Finder; if it also fails, the dialog shows both errors. Neither method permanently deletes the file.
 - Trashed documents disappear from the tree and recent-document list. Trashing the open document clears its cached contents and history and returns to startup; trashing another document keeps the current document open.
 - On macOS, restore a trashed document by dragging it out of Trash and opening it again. The native Trash API may not provide Finder's Put Back action.
+
+## 20. Manuscript v1
+
+A .fable document can contain one continuous rich-text manuscript alongside its idea tree. Its reading order is independent of cards. [Manuscript v1 specification](manuscript_v1_proposal.md)
+
+- **Workspace.** Show Tree, Show Both, and Show Manuscript are available in Window and the command palette. Both keeps Tree on the left and Manuscript on the right, with a single-line divider that responds to pointer and keyboard resizing. Dragging the divider preserves pane focus and text selection. Manuscript keeps at least 32 px of space on each side at split-capable widths and 24 px in narrow windows. Below the split breakpoint, the active pane fills the window and Show Both indicates that more width is needed. Widening restores the requested split unless the writer explicitly chooses a single pane. The requested layout and divider ratio are local per-document preferences. Pane changes preserve the editors, their selections, and scroll state during the session. In Both, the selected Tree card keeps its place while Manuscript has focus and regains its active styling when Tree regains focus. Tree zoom remains specific to Tree.
+- **Keyboard.** Use Cmd+Option+Left/Right on macOS and Ctrl+Alt+Left/Right on Windows and Linux. At split widths, the first step reveals and focuses the other pane. A second step in the same direction opens that pane alone. Below the breakpoint, each direction opens its destination directly. The shortcuts ignore repeats and composition. Focus Pane Left and Right also appear in Window and the palette. Cmd/Ctrl+F searches the active pane.
+- **Creation and editing.** Entering an empty Manuscript pane focuses a blank editor. The first edit creates the manuscript in one undo step. Write Manuscript explicitly creates and focuses an empty manuscript. Import Manuscript Markdown remains available from File and the command palette. Navigation-mode card copy pastes the card's own formatted prose in the manuscript. Chips become label text. The manuscript uses the card prose schema and normal rich-text editing. Use cut and paste to rearrange prose. Remove Manuscript confirms removal and returns to Tree. Undo restores the manuscript with its passage links. Undo is chronological across both panes once a manuscript is part of the document session.
+- **Passage links.** Control+L on selected manuscript prose focuses Tree. Navigate as usual or click an idea card, then press Enter to link the selected card. Enter returns focus to the passage with the caret at its start. Escape cancels and restores the selection. Typing an existing card ID such as `#B02` links the whole manuscript paragraph and consumes the ID. In Both, its card becomes active as soon as the ID is accepted. A tag on a blank line shows the margin bar immediately, and the first prose in that paragraph persists the link. The linked range grows as the writer continues the paragraph and ends when Enter starts the next one. A thick grey line in the left margin marks the linked lines and adjusts when the text wraps. Each character can link to one card. A new link replaces the target wherever the ranges intersect and preserves older links outside that range. In Both, a manuscript selection touching a passage activates its linked card in Tree while the manuscript keeps keyboard focus. A selection spanning separate links activates the first linked card in reading order. Card footers show backlinks in reading order and each entry places the caret at the start of its passage, including in aliases and Wide Lens. The × beside a backlink removes that association in one undoable step and keeps the prose. Logical line labels follow paragraph and hard-break structure and remain stable when prose wraps differently.
+- **Revision.** Text edits map ranges with the prose. Pure deletion removes a passage when no linked text survives. A whole-span replacement keeps its targets. The first successful paste of a cut in its source manuscript carries linked fragments and retains the identity of fully moved passages. Later pastes, copy, and cross-document paste insert independent prose. Deleted targets are pruned without affecting other targets. Undo and redo include the links each edit changed.
+- **Files.** File and the palette expose separate Import and Export Manuscript Markdown commands. Import reads and validates UTF-8, confirms replacement and loss of existing links, and is undoable in one step. Export writes the whole current prose with a suggested ` - Manuscript.md` suffix. Markdown carries supported rich formatting and regular URLs. Passage IDs and card associations remain in the .fable file.
+- **External changes.** A clean window refreshes after a validated external write. A stale save keeps the local edits in memory and offers Save a Separate Copy and Reload Latest Revision. The writer can explicitly discard local changes after confirmation.
+- **Deferred.** Write locking, comments, and alternate manuscripts remain outside this increment.
+
+
+## History v1
+
+[History v1 proposal](history_v1_proposal.md)
+
+The History heading and close button stay visible while the snapshot list scrolls. The timeline ends with the earliest retained snapshot, followed by the document’s original creation date and time in plain text.
+
+- **Browse.** Open or close History with Cmd+Shift+H on Mac, Ctrl+H on Windows and Linux, or Tools → Toggle History. The command palette also offers Show History. History opens to the right of the active Tree or Manuscript pane, or full width with Back on narrow windows. A close icon sits at the top right. The timeline starts with Current selected and shows retained snapshots with the newest first. Preload ten historical rows and their saved diffs while the document is open. Show available rows immediately while checking for updates, then fetch the next ten in the background. New saves can add their predecessor to the archive. Older hidden saves never become timeline entries. Beginning to edit Current closes History. The History panel matches the background of the displayed Tree or Manuscript pane. Timeline cards have transparent backgrounds and equal width and spacing. The selected or keyboard-focused snapshot uses the Tree card shadow. Up and Down move between timeline entries and load older saves as needed. Enter focuses the selected snapshot’s read-only Tree or Manuscript. Escape returns to the selected timeline row. Escape from the timeline or the History shortcut closes History and restores the previous live layout and pane. Each save shows a concise local time label and its exact timestamp on hover. Labels use elapsed seconds or minutes for the last two hours, a local time with hours, minutes, and am or pm for Today, Yesterday, and weekday labels through the preceding seven local calendar days, and the full date thereafter. A historical preview keeps the live workspace available by returning to Current.
+- **Inspect changes.** A snapshot opens directly in the regular read-only workspace. A Tree-only change opens Tree and a Manuscript-only change opens Manuscript. Mixed changes keep the displayed pane. Each pane opens at an affected location when available. Added text is highlighted relative to the previous visible save. Timeline rows show rounded card IDs only when cards changed, using green for additions, orange for edits and moves, and red for deletions. Green and red totals include characters added and removed across cards and the manuscript. Current represents the latest save and shows the same diff summary against the first historical card beneath it.
+- **Restore.** Press Enter on a historical card or manuscript to request editing. Confirm to restore the entire snapshot, including the tree, rich prose, manuscript, and passage links, as a new latest revision. History closes and editing starts in the chosen card or manuscript. The restore leaves intervening snapshots in the archive and is undoable as one edit. A save from another writer leaves the historical view in place, refreshes Current, and requires confirmation against the updated Current. Escape dismisses confirmation first. Unavailable, expired, and identical snapshots cannot be restored.
+- **Copy.** Copy a formatted text selection or use Cmd/Ctrl+C in historical Tree navigation to copy the active subtree. Pasting a subtree beside a live card assigns fresh IDs, remaps internal references, applies normal rules for external references, and creates one undoable change. A loaded snapshot remains readable and copyable if its revision expires while History is open.
+- **Retention.** When a save replaces Current, evaluate that previous snapshot once. Keep burst boundaries, substantial pre-loss and restore checkpoints, and same-burst drafts whose recoverable edits meet the threshold. Immediately prune low-value saves from the same burst. Every ten minutes, thin the retained archive by age. Reserve a ten-minute landmark for saves aged ten minutes to an hour, an hourly landmark through 24 hours, a six-hour landmark through seven days, and daily or weekly landmarks thereafter. Older bands allow fewer recovery saves or require higher scores. [Adaptive retention policy](history_v1_proposal.md#physical-pruning)

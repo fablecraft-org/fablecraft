@@ -11,6 +11,7 @@
     "core:window:allow-set-title-bar-style",
     "core:window:allow-start-dragging",
     "dialog:allow-open",
+    "dialog:allow-confirm",
     "dialog:allow-save",
     "process:allow-restart",
     "updater:allow-check",

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { serializeComparableDocumentSnapshot } from "../domain/document/serialization";
+import { latestRevisionId, serializeComparableDocumentSnapshot } from "../domain/document/serialization";
 import {
   loadCurrentDocumentClock,
   loadCurrentDocumentSnapshot,
@@ -63,6 +63,7 @@ export function useExternalDocumentReload(document: DocumentSummary | null) {
         cancelled ||
         inFlightRef.current ||
         dirty ||
+        useDocumentStore.getState().restoringHistory ||
         saveState === "saving" ||
         !snapshot ||
         snapshot.summary.documentId !== activeDocument.documentId
@@ -91,20 +92,19 @@ export function useExternalDocumentReload(document: DocumentSummary | null) {
           return;
         }
 
-        lastSeenClockRef.current = latestClockKey;
         const latestSnapshot = await loadCurrentDocumentSnapshot();
 
-        if (
-          cancelled ||
-          latestSnapshot.summary.documentId !== activeDocument.documentId ||
-          serializeComparableDocumentSnapshot(latestSnapshot) ===
-            serializeComparableDocumentSnapshot(snapshot)
-        ) {
-          return;
-        }
+        if (cancelled || latestSnapshot.summary.documentId !== activeDocument.documentId ||
+          latestSnapshot.summary.path !== activeDocument.path ||
+          useDocumentStore.getState().dirty || useDocumentStore.getState().restoringHistory ||
+          useDocumentStore.getState().snapshot !== snapshot) return;
 
-        commitExternalSnapshot(latestSnapshot);
-        setNotice({
+        const changed = serializeComparableDocumentSnapshot(latestSnapshot) !==
+          serializeComparableDocumentSnapshot(snapshot);
+        lastSeenClockRef.current = latestClockKey;
+        if (!changed && latestRevisionId(latestSnapshot) === latestRevisionId(snapshot)) return;
+        commitExternalSnapshot(latestSnapshot, snapshot);
+        if (changed) setNotice({
           message: "Document reloaded after an external update.",
           tone: "info",
         });

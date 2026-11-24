@@ -84,6 +84,10 @@ export const CardLinkNode = Node.create<CardLinkOptions>({
           const payload = decodeCardClipboardPayload(event.clipboardData?.getData(CARD_CLIPBOARD_MIME_TYPE) ?? "")
             ?? decodeCardClipboardPayload(event.clipboardData?.getData("text/plain") ?? "");
           if (!payload || payload.operation !== "copy") return false;
+          if (payload.kind === "subtree") {
+            event.preventDefault();
+            return true;
+          }
           event.preventDefault();
           const label = options.getLabels()[payload.source.rootCardId];
           if (payload.source.documentId !== options.getDocumentId() || !label) return true;

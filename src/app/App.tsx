@@ -1,15 +1,19 @@
+import { manuscriptCommands } from "../components/manuscriptCommands";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import {
-  promptForConvertedCardDocument,
   promptForNewDocument,
+  promptForNewDocumentFromTree,
   promptForOpenDocument,
 } from "./documentActions";
 import { exportCurrentLevelToFile, importMarkdownDocument } from "./importExportActions";
 import { AppUpdateDialog } from "../components/AppUpdateDialog";
 import { CommandPalette, type CommandPaletteItem } from "../components/CommandPalette";
-import { DocumentWorkspace } from "../components/DocumentWorkspace";
+import { DocumentHistory } from "../components/DocumentHistory";
+import type { WorkspacePane } from "../domain/document/manuscriptLayout";
+import { historyLayoutTokens } from "../styles/tokens";
+import { DocumentWorkspace, type HistoryEditTarget, type WorkspaceViewMode } from "../components/DocumentWorkspace";
 import { FeedbackDialog, type FeedbackDialogMode } from "../components/FeedbackDialog";
 import { HelpSheet } from "../components/HelpSheet";
 import { RecentDocumentsOverlay } from "../components/RecentDocumentsOverlay";
@@ -26,9 +30,10 @@ import { mergeCardWithNextSibling, mergeCardWithPreviousSibling } from "../domai
 import {
   dispatchNativeMenuAction,
   listenForNativeMenuActions,
+  updateWorkspaceMenu,
   type NativeMenuAction,
 } from "../lib/nativeMenu";
-import { syncNativeWindowAppearance } from "../lib/nativeWindowAppearance";
+import { isMacOs, syncNativeWindowAppearance } from "../lib/nativeWindowAppearance";
 import {
   listenForNativeOpenDocuments,
   takePendingOpenDocumentPaths,
@@ -44,6 +49,7 @@ import { openDocumentAtPath } from "../storage/documents";
 import { isBetaNoticeDismissed, rememberBetaNoticeDismissal } from "../storage/betaNotice";
 import { saveDocumentSnapshotAtPath } from "../storage/documentSnapshots";
 import { forceSaveCurrentDocument } from "../storage/forceSave";
+import { preloadHistoryFirstPage, warmDocumentHistory, type HistoryFirstPage } from "../storage/documentHistory";
 import {
   enableClaudeDesktopIntegration,
   enableCodexIntegration,
@@ -108,6 +114,19 @@ export function App() {
   const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateProgress | null>(null);
   const [showBetaBar, setShowBetaBar] = useState(() => !isBetaNoticeDismissed());
   const [recentDocumentPaths, setRecentDocumentPaths] = useState<string[]>([]);
+  const [history, setHistory] = useState<{
+    session: number;
+    path: string;
+    pane: WorkspacePane;
+    livePane: WorkspacePane;
+    surfaceVisible: boolean;
+  } | null>(null);
+  const [treeViewMode, setTreeViewMode] = useState<WorkspaceViewMode>("normal");
+  const [historyPaneRequest, setHistoryPaneRequest] = useState<(HistoryEditTarget & { session: number; startEditing?: boolean; keepEditing?: boolean }) | null>(null);
+  const [historyNarrow, setHistoryNarrow] = useState(() => window.innerWidth < historyLayoutTokens.narrowWidth);
+  const historyOpening = useRef(false);
+  const historicalPreview = useDocumentStore((state) => state.historicalPreview);
+  const documentSession = useDocumentStore((state) => state.session);
   const nativeMenuActionHandlerRef = useRef<(action: NativeMenuAction) => void>(() => {});
   const openDocumentPathHandlerRef = useRef<(path: string) => void>(() => {});
   const openDocumentPromptInFlightRef = useRef(false);
@@ -134,6 +153,127 @@ export function App() {
     activeDocument && snapshot?.summary.documentId === activeDocument.documentId
       ? snapshot
       : null;
+  const firstHistoryPage = useMemo<HistoryFirstPage>(() => ({ page: null, pending: null }),
+    [documentSession, activeDocument?.path, activeDocument?.documentId]);
+  const historyHeadId = activeSnapshot?.revisions[0]?.id;
+  const openHistory = history?.session === documentSession && history.path === activeDocument?.path
+    ? history : null;
+  const historyTimelineOnly = Boolean(openHistory && historyNarrow && !openHistory.surfaceVisible);
+  const historyBlocksLive = historicalPreview || historyTimelineOnly;
+  const historyShortcutsSuspended = Boolean(isSettingsOpen || helpSheetMode || feedbackDialogMode ||
+    isRecentDocumentsOpen || appUpdateDialogStatus || mode === "command" || mode === "search");
+
+  useEffect(() => {
+    const resize = () => setHistoryNarrow(window.innerWidth < historyLayoutTokens.narrowWidth);
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  useEffect(() => {
+    if (history && !openHistory) {
+      setHistory(null);
+      setHistoryPaneRequest(null);
+      useDocumentStore.getState().setHistoricalPreview(false);
+    }
+  }, [history, openHistory]);
+
+  async function toggleHistory() {
+    if (!activeDocument || !activeSnapshot || historyOpening.current ||
+      useInteractionStore.getState().workspaceDialog ||
+      document.querySelector("[data-editor-composing=true]")) return;
+    if (openHistory) {
+      closeHistory();
+      return;
+    }
+    const pane = useInteractionStore.getState().workspacePane;
+    const path = activeDocument.path;
+    const session = useDocumentStore.getState().session;
+    historyOpening.current = true;
+    useDocumentStore.getState().setHistoricalPreview(true);
+    try {
+      await forceSaveCurrentDocument();
+      const state = useDocumentStore.getState();
+      if (state.session !== session || state.snapshot?.summary.path !== path) return;
+      setHistoryPaneRequest(null);
+      setHistory({ session, path, pane, livePane: pane, surfaceVisible: false });
+    } catch (error) {
+      if (useDocumentStore.getState().session === session) {
+        setNotice({ tone: "error", message: noticeMessage(error, "Fablecraft could not flush pending edits.") });
+      }
+    } finally {
+      historyOpening.current = false;
+      if (useDocumentStore.getState().session === session) useDocumentStore.getState().setHistoricalPreview(false);
+    }
+  }
+
+  function changeHistoryPane(pane: WorkspacePane) {
+    setHistory((current) => current ? { ...current, pane } : current);
+    if (openHistory?.surfaceVisible && !useDocumentStore.getState().historicalPreview) {
+      setHistoryPaneRequest({ pane, session: documentSession });
+    }
+  }
+
+  function showHistorySurface(visible: boolean) {
+    setHistory((current) => current ? { ...current, surfaceVisible: visible } : current);
+    if (visible && openHistory && !useDocumentStore.getState().historicalPreview) {
+      setHistoryPaneRequest({ pane: openHistory.pane, session: documentSession });
+    }
+  }
+
+  function closeHistory(editTarget?: HistoryEditTarget) {
+    if (!openHistory || (useDocumentStore.getState().restoringHistory && !editTarget)) return;
+    useDocumentStore.getState().setHistoricalPreview(false);
+    setHistoryPaneRequest(editTarget
+      ? { ...editTarget, session: documentSession, startEditing: true }
+      : { pane: openHistory.livePane, session: documentSession });
+    setHistory(null);
+  }
+
+  useEffect(() => {
+    if (!activeDocument || !isTauri()) return;
+    const document = activeDocument;
+    const prepare = () => void warmDocumentHistory(document).catch(console.error);
+    prepare();
+    const timer = window.setInterval(prepare, 10 * 60_000);
+    return () => window.clearInterval(timer);
+  }, [activeDocument?.documentId, activeDocument?.path]);
+
+  useEffect(() => {
+    if (openHistory || !activeDocument || !historyHeadId || firstHistoryPage.page?.headId === historyHeadId) return;
+    const document = activeDocument;
+    let stopped = false;
+    let timer: number | undefined;
+    async function preload() {
+      try {
+        const page = await preloadHistoryFirstPage(document, firstHistoryPage);
+        if (!stopped && page.preparing) timer = window.setTimeout(() => void preload(), 250);
+      } catch {
+        // Opening History can retry and display an error if the read still fails.
+      }
+    }
+    void preload();
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, [firstHistoryPage, historyHeadId, Boolean(openHistory)]);
+
+  useEffect(() => {
+    if (!openHistory) return;
+    const history = openHistory;
+    function closeForEditing() {
+      const state = useDocumentStore.getState();
+      if (state.session !== history.session || state.historicalPreview || state.restoringHistory) return;
+      setHistoryPaneRequest(history.pane === history.livePane ? null
+        : { pane: history.pane, session: history.session, keepEditing: true });
+      setHistory(null);
+    }
+    const unsubscribeMode = useAppStore.subscribe((next, previous) => {
+      if (next.mode === "editing" && previous.mode === "navigation") closeForEditing();
+    });
+    const unsubscribeDocument = useDocumentStore.subscribe((next, previous) => {
+      if (next.dirty && next.snapshot !== previous.snapshot) closeForEditing();
+    });
+    return () => { unsubscribeMode(); unsubscribeDocument(); };
+  }, [openHistory]);
+
   const selectedCard =
     activeSnapshot?.cards.find((card) => card.id === activeCardId) ?? null;
   const selectedSiblingGroup = selectedCard
@@ -192,6 +332,9 @@ export function App() {
 
   function restoreOverlayMode() {
     setMode(overlayReturnMode);
+    if (useInteractionStore.getState().workspacePane === "manuscript") {
+      requestAnimationFrame(() => dispatchNativeMenuAction("restore-manuscript-focus"));
+    }
   }
 
   function closeAuxiliaryOverlays() {
@@ -446,7 +589,20 @@ export function App() {
         return;
       }
 
-      if (screen !== "workspace") {
+      // Desktop dispatches this accelerator through the native Tools menu.
+      if (!isTauri() && activeSnapshot && screen === "workspace" && !historyShortcutsSuspended &&
+        !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 &&
+        !event.altKey && event.key.toLowerCase() === "h" &&
+        (isMacOs() ? event.metaKey && event.shiftKey && !event.ctrlKey
+          : event.ctrlKey && !event.metaKey && !event.shiftKey)) {
+        event.preventDefault();
+        if (!event.repeat) void toggleHistory();
+        return;
+      }
+      if (historyBlocksLive || (event.target instanceof Element && event.target.closest(".fc-history-timeline"))) return;
+      if (screen !== "workspace" || event.defaultPrevented || event.isComposing ||
+        event.keyCode === 229 || useInteractionStore.getState().workspaceDialog ||
+        isSettingsOpen || helpSheetMode || feedbackDialogMode || isRecentDocumentsOpen || appUpdateDialogStatus) {
         return;
       }
 
@@ -458,7 +614,9 @@ export function App() {
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
-        openSearchOverlay();
+        if (useInteractionStore.getState().workspacePane === "manuscript" && mode !== "command" && mode !== "search") {
+          dispatchNativeMenuAction("search");
+        } else openSearchOverlay();
         return;
       }
 
@@ -476,6 +634,10 @@ export function App() {
       window.removeEventListener("keydown", handleGlobalKeyDown, true);
     };
   }, [
+    activeSnapshot,
+    historyBlocksLive,
+    historyShortcutsSuspended,
+    toggleHistory,
     feedbackDialogMode,
     appUpdateDialogStatus,
     helpSheetMode,
@@ -537,23 +699,26 @@ export function App() {
     }
   }
 
-  async function handleConvertCardToDocument() {
+  async function handleNewDocumentFromTree() {
     if (!activeSnapshot || !activeDocument || !activeCardId || !selectedCard) {
       return;
     }
 
-    const sourceSnapshot = activeSnapshot;
     const sourcePath = activeDocument.path;
+    let targetCreated = false;
 
     try {
       await forceSaveCurrentDocument();
-      const targetDocument = await promptForConvertedCardDocument(
+      const sourceSnapshot = useDocumentStore.getState().snapshot;
+      if (!sourceSnapshot || sourceSnapshot.summary.path !== sourcePath) return;
+      const targetDocument = await promptForNewDocumentFromTree(
         defaultConvertedDocumentName(sourceSnapshot, activeCardId),
       );
 
       if (!targetDocument) {
         return;
       }
+      targetCreated = true;
 
       const targetSnapshot = createDocumentFromCardSubtree(
         sourceSnapshot,
@@ -582,12 +747,15 @@ export function App() {
       setMode("navigation");
       setNotice({
         tone: "info",
-        message: `Converted card to "${targetDocument.name}".`,
+        message: `Moved tree to "${targetDocument.name}".`,
       });
     } catch (error) {
+      if (targetCreated && useAppStore.getState().activeDocument?.path === sourcePath) {
+        await openDocumentAtPath(sourcePath).catch(console.error);
+      }
       setNotice({
         tone: "error",
-        message: noticeMessage(error, "Fablecraft could not convert that card."),
+        message: noticeMessage(error, "Fablecraft could not move that tree into a new document."),
       });
     }
   }
@@ -798,7 +966,30 @@ export function App() {
   }
 
   function handleNativeMenuAction(action: NativeMenuAction) {
+    if (action === "show-history") {
+      if (!useDocumentStore.getState().restoringHistory &&
+        (!historyShortcutsSuspended || mode === "command" || mode === "search")) {
+        if (mode === "command" || mode === "search") setMode(overlayReturnMode);
+        void toggleHistory();
+      }
+      return;
+    }
+    if (historyBlocksLive || useDocumentStore.getState().historicalPreview ||
+      useInteractionStore.getState().workspaceDialog) return;
+    if (openHistory && (action === "layout-tree" || action === "layout-manuscript" ||
+      action === "pane-left" || action === "pane-right")) {
+      changeHistoryPane(action === "layout-tree" || action === "pane-left" ? "tree" : "manuscript");
+      return;
+    }
+    if (openHistory && action === "layout-both") return;
     dispatchNativeMenuAction(action);
+
+    if (action === "reload-window") {
+      void forceSaveCurrentDocument().then(() => window.location.reload()).catch((error: unknown) => {
+        setNotice({ tone: "error", message: noticeMessage(error, "Fablecraft could not flush pending edits.") });
+      });
+      return;
+    }
 
     if (action === "new-document") {
       void handleNewDocument();
@@ -831,7 +1022,7 @@ export function App() {
     }
 
     if (action === "export-markdown") {
-      void exportLevelFromMenu("markdown");
+      if (useInteractionStore.getState().workspacePane === "tree") void exportLevelFromMenu("markdown");
       return;
     }
 
@@ -840,7 +1031,7 @@ export function App() {
     }
 
     if (action === "search") {
-      openSearchOverlay();
+      if (useInteractionStore.getState().workspacePane === "tree" && !useInteractionStore.getState().workspaceDialog) openSearchOverlay();
       return;
     }
 
@@ -955,7 +1146,35 @@ export function App() {
     };
   }, []);
 
+  const workspacePane = useInteractionStore((state) => state.workspacePane);
+  const workspaceSplitFits = useInteractionStore((state) => state.workspaceSplitFits);
+  const manuscriptLinkEligible = useInteractionStore((state) => state.manuscriptLinkEligible);
+  const workspaceDialog = useInteractionStore((state) => state.workspaceDialog);
+  const documentOpen = Boolean(activeSnapshot);
+  const hasManuscript = Boolean(activeSnapshot?.manuscript);
+  const nativeWorkspaceDialog = Boolean(historyBlocksLive || workspaceDialog || isSettingsOpen || helpSheetMode || feedbackDialogMode ||
+    isRecentDocumentsOpen || appUpdateDialogStatus || mode === "command" || mode === "search");
+  useEffect(() => {
+    if (!isTauri()) return;
+    void updateWorkspaceMenu({
+      documentOpen,
+      manuscript: hasManuscript,
+      treeActive: workspacePane === "tree",
+      splitFits: workspaceSplitFits,
+      dialog: nativeWorkspaceDialog,
+      link: manuscriptLinkEligible,
+    }).catch(console.error);
+  }, [documentOpen, hasManuscript, workspacePane, workspaceSplitFits, nativeWorkspaceDialog, manuscriptLinkEligible]);
   const commandItems: CommandPaletteItem[] = [
+    ...(documentOpen ? [{
+      id: "show-history",
+      keywords: ["snapshots", "revisions", "restore"],
+      label: openHistory ? "Close History" : "Show History",
+      run: () => {
+        setMode(overlayReturnMode);
+        void toggleHistory();
+      },
+    }] : []),
     {
       id: "getting-started",
       keywords: ["first time", "guide", "intro", "help"],
@@ -1072,7 +1291,23 @@ export function App() {
       label: "Request a Feature",
       run: () => runPaletteAction(() => openFeedbackDialog("feature")),
     },
-  ];
+  ].filter((item) => workspacePane === "tree" || (item.id !== "export-markdown" && item.id !== "export-html"));
+
+  for (const [id, label] of manuscriptCommands) {
+    const needsManuscript = id === "remove-manuscript" || id === "export-manuscript-markdown"
+      || id === "link-manuscript-passage";
+    const eligible = id !== "link-manuscript-passage" || manuscriptLinkEligible;
+    if (!activeSnapshot || (needsManuscript && !activeSnapshot.manuscript) ||
+      !eligible) continue;
+    commandItems.push({
+      id,
+      label: id === "layout-both" && !workspaceSplitFits ? `${label} (widen window)` : label,
+      run: () => {
+        restoreOverlayMode();
+        dispatchNativeMenuAction(id);
+      },
+    });
+  }
 
   function handleWindowDragMouseDown(event: MouseEvent<HTMLDivElement>) {
     if (event.button !== 0 || !isTauri()) {
@@ -1085,13 +1320,13 @@ export function App() {
     });
   }
 
-  if (activeSnapshot) {
+  if (activeSnapshot && workspacePane === "tree") {
     if (selectedCard) {
       commandItems.push({
-        id: "convert-card-to-document",
-        keywords: ["card", "extract", "move", "subtree"],
-        label: "Convert Card to Document",
-        run: () => runPaletteAction(handleConvertCardToDocument),
+        id: "new-document-from-tree",
+        keywords: ["convert card to document", "extract", "move", "subtree"],
+        label: "New Document From Tree",
+        run: () => runPaletteAction(handleNewDocumentFromTree),
       });
     }
 
@@ -1115,9 +1350,9 @@ export function App() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[var(--fc-color-app)] text-[var(--fc-color-text)] antialiased">
+    <main className="fc-desktop-shell h-screen overflow-clip bg-[var(--fc-color-app)] text-[var(--fc-color-text)] antialiased">
       <div
-        className="fc-window-drag-region fixed inset-x-0 top-0 z-20 h-32"
+        className="fc-window-drag-region fixed inset-x-0 top-0 z-20"
         data-tauri-drag-region
         onMouseDown={handleWindowDragMouseDown}
       />
@@ -1141,20 +1376,49 @@ export function App() {
         )}
 
         {screen === "workspace" && activeDocument && (
-          <DocumentWorkspace
-            document={activeDocument}
-            onDocumentCreated={handleWorkspaceDocumentCreated}
-            onDocumentDeleted={handleWorkspaceDocumentDeleted}
-            onDocumentRenamed={handleWorkspaceDocumentRenamed}
-            onOpenDocumentPath={handleOpenDocumentPath}
-            suspendKeyboard={Boolean(
-              isSettingsOpen ||
-                helpSheetMode ||
-                feedbackDialogMode ||
-                isRecentDocumentsOpen ||
-                appUpdateDialogStatus,
+          <div className="fc-history-workspace" data-history={Boolean(openHistory)}
+            data-narrow={historyNarrow} style={{
+              "--fc-history-width": `${historyLayoutTokens.timelineWidth}px`,
+              "--fc-history-gap": `${historyLayoutTokens.gap}px`,
+              "--fc-history-padding": `${historyLayoutTokens.padding}px`,
+            } as CSSProperties}>
+            <div className="fc-history-live" hidden={Boolean(openHistory && historyBlocksLive)}
+              inert={historyBlocksLive}>
+              {openHistory && historyNarrow && openHistory.surfaceVisible && (
+                <div className="fc-history-current-bar">
+                  <button type="button" onClick={() => {
+                    showHistorySurface(false);
+                    requestAnimationFrame(() => document.querySelector<HTMLElement>(".fc-history-timeline [aria-current=true]")?.focus({ preventScroll: true }));
+                  }}>Back</button>
+                  <span>Current</span>
+                </div>
+              )}
+              <div className="fc-history-live-surface">
+                <DocumentWorkspace
+                  document={activeDocument}
+                  onDocumentCreated={handleWorkspaceDocumentCreated}
+                  onDocumentDeleted={handleWorkspaceDocumentDeleted}
+                  onDocumentRenamed={handleWorkspaceDocumentRenamed}
+                  onOpenDocumentPath={handleOpenDocumentPath}
+                  historyOpen={Boolean(openHistory)}
+                  historyPane={openHistory?.pane}
+                  onTreeViewMode={setTreeViewMode}
+                  historyPaneRequest={historyPaneRequest?.session === documentSession ? historyPaneRequest : null}
+                  suspendKeyboard={historyBlocksLive || Boolean(isSettingsOpen || helpSheetMode ||
+                    feedbackDialogMode || isRecentDocumentsOpen || appUpdateDialogStatus)}
+                />
+              </div>
+            </div>
+            {openHistory && activeSnapshot && (
+              <DocumentHistory key={openHistory.session} document={activeDocument} current={activeSnapshot}
+                session={openHistory.session} pane={openHistory.pane} treeViewMode={treeViewMode}
+                firstPage={firstHistoryPage}
+                narrow={historyNarrow} surfaceVisible={openHistory.surfaceVisible}
+                shortcutsSuspended={historyShortcutsSuspended}
+                onPane={changeHistoryPane} onSurfaceVisible={showHistorySurface}
+                onClose={() => closeHistory()} onRestore={closeHistory} />
             )}
-          />
+          </div>
         )}
       </div>
 

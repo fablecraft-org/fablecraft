@@ -5,6 +5,8 @@ use fablecraft_lib::mcp::{invoke_mcp_tool_for_path, McpToolRequest};
 use serde_json::{json, Map, Value};
 
 const TOOL_GET_DOCUMENT: &str = "fablecraft_get_document";
+const TOOL_GET_MANUSCRIPT: &str = "fablecraft_get_manuscript";
+const TOOL_EDIT_MANUSCRIPT: &str = "fablecraft_edit_manuscript";
 const TOOL_GET_CARD: &str = "fablecraft_get_card";
 const TOOL_GET_SUBTREE: &str = "fablecraft_get_subtree";
 const TOOL_SET_CARD_TEXT: &str = "fablecraft_set_card_text";
@@ -187,7 +189,7 @@ fn scoped_request_fields(
     arguments: &mut Map<String, Value>,
 ) -> Result<(&'static str, Option<String>), String> {
     match name {
-        TOOL_GET_OPEN_DOCUMENTS | TOOL_GET_DOCUMENT => Ok(("document", None)),
+        TOOL_GET_OPEN_DOCUMENTS | TOOL_GET_DOCUMENT | TOOL_GET_MANUSCRIPT | TOOL_EDIT_MANUSCRIPT => Ok(("document", None)),
         TOOL_GET_CARD | TOOL_SET_CARD_TEXT => {
             Ok(("card", Some(extract_required_string(arguments, "cardId")?)))
         }
@@ -237,6 +239,28 @@ fn tool_definitions() -> Vec<Value> {
                     path_schema("Absolute path to a .fable document."),
                 )],
                 &["documentPath"],
+            ),
+        ),
+        tool(
+            TOOL_GET_MANUSCRIPT,
+            "Read rich-text manuscript, passage ranges and its current revision ID.",
+            object_schema(
+                &[("documentPath", path_schema("Absolute path to a .fable document."))],
+                &["documentPath"],
+            ),
+        ),
+        tool(
+            TOOL_EDIT_MANUSCRIPT,
+            "Replace a half-open ProseMirror range (UTF-16) within one textblock or at sibling block boundaries. Preserve mapped links. Read the revision before editing.",
+            object_schema(
+                &[
+                    ("documentPath", path_schema("Absolute path to a .fable document.")),
+                    ("baseRevisionId", json!({ "type": "string" })),
+                    ("from", json!({ "type": "integer", "minimum": 0 })),
+                    ("to", json!({ "type": "integer", "minimum": 0 })),
+                    ("insert", json!({ "type": "array", "items": { "type": "object" }, "description": "Closed rich-text JSON nodes to insert. An empty array deletes." })),
+                ],
+                &["documentPath", "baseRevisionId", "from", "to", "insert"],
             ),
         ),
         tool(

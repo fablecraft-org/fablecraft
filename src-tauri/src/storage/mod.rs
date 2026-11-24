@@ -1,25 +1,31 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppErrorPayload, AppResult};
 
+mod adaptive_history;
+mod history;
+mod history_changes;
+pub use history::{HistoryComparison, HistoryCursor, HistoryPage, HistoryVersion};
+pub(crate) mod manuscript;
 mod migrations;
+use manuscript::Manuscript;
 mod passage_anchors;
 
 const DEFAULT_CARD_TYPE: &str = "card";
 const NEW_CARD_EDITOR_DOCUMENT: &str =
     r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
-const REVISION_PREVIEW_LIMIT: i64 = 20;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSummary {
+    pub created_at_ms: u64,
     pub document_id: String,
     pub file_modified_at_ms: u64,
     pub name: String,
@@ -54,12 +60,12 @@ pub struct CardContentRecord {
     pub content_json: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RevisionRecord {
     pub created_at_ms: u64,
     pub id: String,
-    pub snapshot: String,
+    pub sequence: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +73,7 @@ pub struct RevisionRecord {
 pub struct DocumentSnapshot {
     pub cards: Vec<CardRecord>,
     pub contents: Vec<CardContentRecord>,
+    pub manuscript: Option<Manuscript>,
     pub revisions: Vec<RevisionRecord>,
     pub summary: DocumentSummary,
 }
@@ -77,6 +84,25 @@ pub struct EditableDocumentSnapshot {
     pub cards: Vec<CardRecord>,
     pub contents: Vec<CardContentRecord>,
     pub document_id: String,
+    #[serde(default, skip_serializing)]
+    pub base_revision_id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub manuscript_aware: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manuscript: Option<Manuscript>,
+}
+
+impl From<&DocumentSnapshot> for EditableDocumentSnapshot {
+    fn from(snapshot: &DocumentSnapshot) -> Self {
+        Self {
+            cards: snapshot.cards.clone(),
+            contents: snapshot.contents.clone(),
+            document_id: snapshot.summary.document_id.clone(),
+            base_revision_id: snapshot.revisions.first().map(|revision| revision.id.clone()),
+            manuscript_aware: true,
+            manuscript: snapshot.manuscript.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,7 +155,8 @@ impl DocumentRepository {
             fs::create_dir_all(parent)?;
         }
 
-        let mut connection = open_connection(&path, true)?;
+        OpenOptions::new().write(true).create_new(true).open(&path)?;
+        let mut connection = open_connection(&path)?;
         run_migrations(&mut connection)?;
         seed_document(&mut connection)?;
         summarize_document(&connection, &path)
@@ -145,9 +172,11 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path, false)?;
+        let mut connection = open_connection(&path)?;
         run_migrations(&mut connection)?;
-        summarize_document(&connection, &path)
+        let summary = summarize_document(&connection, &path)?;
+        history::queue_preparation(path, summary.document_id.clone());
+        Ok(summary)
     }
 
     fn load_inner(path: PathBuf) -> AppResult<DocumentSnapshot> {
@@ -160,9 +189,10 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path, false)?;
+        let mut connection = open_connection(&path)?;
         run_migrations(&mut connection)?;
-        build_document_snapshot(&connection, &path)
+        let transaction = connection.transaction()?;
+        build_document_snapshot(&transaction, &path)
     }
 
     fn clock_inner(path: PathBuf) -> AppResult<DocumentClock> {
@@ -175,14 +205,14 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path, false)?;
+        let mut connection = open_connection(&path)?;
         run_migrations(&mut connection)?;
         build_document_clock(&connection, &path)
     }
 
     fn save_inner(
         path: PathBuf,
-        mut snapshot: EditableDocumentSnapshot,
+        snapshot: EditableDocumentSnapshot,
     ) -> AppResult<SaveDocumentResult> {
         validate_fable_path(&path)?;
 
@@ -193,14 +223,50 @@ impl DocumentRepository {
             ));
         }
 
-        let mut connection = open_connection(&path, false)?;
+        let mut connection = open_connection(&path)?;
         run_migrations(&mut connection)?;
 
-        let existing_document_id = document_id(&connection)?;
+        let document = snapshot.document_id.clone();
+        history::ensure_timeline(&mut connection, &document)?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let result = Self::write_revision(&transaction, snapshot, false)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    fn write_revision(
+        transaction: &Connection,
+        mut snapshot: EditableDocumentSnapshot,
+        restored: bool,
+    ) -> AppResult<SaveDocumentResult> {
+        check_version(transaction)?;
+        let existing_document_id = document_id(transaction)?;
+        let latest = history::head(transaction)?;
+        if latest.as_ref().map(|entry| &entry.id) != snapshot.base_revision_id.as_ref() {
+            return Err(AppError::conflict(
+                "stale_document_revision",
+                "This document changed on disk. Your unsaved edits are still in this window.",
+            ));
+        }
+        if !snapshot.manuscript_aware && transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM manuscript)", [], |row| row.get::<_, bool>(0)
+        )? {
+            return Err(AppError::conflict(
+                "manuscript_aware_writer_required",
+                "This document contains a manuscript. Update the writer to save it.",
+            ));
+        }
         validate_snapshot(&snapshot, &existing_document_id)?;
         passage_anchors::normalize(&snapshot.cards, &mut snapshot.contents);
+        if let Some(prose) = &snapshot.manuscript {
+            manuscript::validate(prose, &snapshot.cards)?;
+        }
 
-        let saved_at_ms = now_ms()?;
+        let saved_at_ms = now_ms()?.max(transaction.query_row(
+            "SELECT updated_at_ms FROM documents WHERE id = ?1",
+            [&existing_document_id],
+            |row| row.get::<_, u64>(0),
+        )?.max(latest.as_ref().map_or(0, |entry| entry.created_at_ms)).saturating_add(1));
         let revision_id = Uuid::new_v4().to_string();
         let revision_snapshot = serde_json::to_string(&snapshot).map_err(|error| {
             AppError::storage(
@@ -210,8 +276,7 @@ impl DocumentRepository {
             )
         })?;
 
-        let transaction = connection.unchecked_transaction()?;
-
+        transaction.execute("DELETE FROM manuscript", [])?;
         transaction.execute("DELETE FROM card_content", [])?;
         transaction.execute("DELETE FROM cards", [])?;
 
@@ -236,6 +301,13 @@ impl DocumentRepository {
             )?;
         }
 
+        if let Some(prose) = &snapshot.manuscript {
+            transaction.execute(
+                "INSERT INTO manuscript (singleton, id, content_json, passages_json) VALUES (1, ?1, ?2, ?3)",
+                params![prose.id, prose.content_json, serde_json::to_string(&prose.passages).expect("serializable passages")],
+            )?;
+        }
+
         transaction.execute(
             "UPDATE documents SET updated_at_ms = ?1 WHERE id = ?2",
             params![saved_at_ms as i64, existing_document_id],
@@ -245,7 +317,10 @@ impl DocumentRepository {
             params![revision_id.clone(), revision_snapshot, saved_at_ms as i64],
         )?;
 
-        transaction.commit()?;
+        if restored {
+            transaction.execute("UPDATE revision_index SET history_restore = 1 WHERE id = ?1", [&revision_id])?;
+        }
+        history::record_save(transaction, &revision_id, saved_at_ms, &snapshot, latest.as_ref(), restored)?;
 
         Ok(SaveDocumentResult {
             revision_id,
@@ -254,38 +329,40 @@ impl DocumentRepository {
     }
 }
 
-fn open_connection(path: &Path, create: bool) -> AppResult<Connection> {
-    let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE;
-    if create {
-        flags |= OpenFlags::SQLITE_OPEN_CREATE;
-    }
-    let connection = Connection::open_with_flags(path, flags)?;
+fn open_connection(path: &Path) -> AppResult<Connection> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
 
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    check_version(&connection)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     // Keep the database truly single-file. WAL would introduce -wal and -shm sidecars.
     connection.pragma_update(None, "journal_mode", "DELETE")?;
-    connection.pragma_update(None, "busy_timeout", 5_000)?;
 
     Ok(connection)
 }
 
-fn run_migrations(connection: &mut Connection) -> AppResult<()> {
-    let current_version: i64 =
-        connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-
-    for (index, migration) in migrations::MIGRATIONS.iter().enumerate() {
-        let target_version = (index + 1) as i64;
-
-        if target_version <= current_version {
-            continue;
-        }
-
-        let transaction = connection.unchecked_transaction()?;
-        transaction.execute_batch(migration)?;
-        transaction.execute_batch(&format!("PRAGMA user_version = {target_version};"))?;
-        transaction.commit()?;
+fn check_version(connection: &Connection) -> AppResult<i64> {
+    let version = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version > migrations::MIGRATIONS.len() as i64 {
+        return Err(AppError::invalid_input(
+            "unsupported_document_version",
+            "This document requires a newer version of Fablecraft.",
+        ));
     }
+    Ok(version)
+}
 
+fn run_migrations(connection: &mut Connection) -> AppResult<()> {
+    if check_version(connection)? == migrations::MIGRATIONS.len() as i64 {
+        return Ok(());
+    }
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current_version = check_version(&transaction)?;
+    for index in current_version as usize..migrations::MIGRATIONS.len() {
+        migrations::apply(&transaction, index)?;
+        transaction.pragma_update(None, "user_version", index + 1)?;
+    }
+    transaction.commit()?;
     Ok(())
 }
 
@@ -330,11 +407,13 @@ fn build_document_snapshot(connection: &Connection, path: &Path) -> AppResult<Do
     let cards = load_cards(connection, &summary.document_id)?;
     let mut contents = load_contents(connection)?;
     passage_anchors::normalize(&cards, &mut contents);
-    let revisions = load_revisions(connection)?;
+    let revisions = history::recent(connection)?;
+    let manuscript = manuscript::load(connection, &cards)?;
 
     Ok(DocumentSnapshot {
         cards,
         contents,
+        manuscript,
         revisions,
         summary,
     })
@@ -373,15 +452,16 @@ fn file_modified_at_ms(path: &Path) -> AppResult<u64> {
 
 fn summarize_document(connection: &Connection, path: &Path) -> AppResult<DocumentSummary> {
     let existing_document_id = document_id(connection)?;
-    let updated_at_ms: i64 = connection.query_row(
-        "SELECT updated_at_ms
+    let (created_at_ms, updated_at_ms): (u64, u64) = connection.query_row(
+        "SELECT created_at_ms, updated_at_ms
          FROM documents
          WHERE id = ?1",
         [existing_document_id.clone()],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
 
     Ok(DocumentSummary {
+        created_at_ms,
         document_id: existing_document_id,
         file_modified_at_ms: file_modified_at_ms(path)?,
         name: path
@@ -392,7 +472,7 @@ fn summarize_document(connection: &Connection, path: &Path) -> AppResult<Documen
             .to_string(),
         opened_at_ms: now_ms()?,
         path: path.to_string_lossy().to_string(),
-        updated_at_ms: updated_at_ms as u64,
+        updated_at_ms,
     })
 }
 
@@ -439,24 +519,6 @@ fn load_contents(connection: &Connection) -> AppResult<Vec<CardContentRecord>> {
         Ok(CardContentRecord {
             card_id: row.get(0)?,
             content_json: row.get(1)?,
-        })
-    })?;
-
-    rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
-}
-
-fn load_revisions(connection: &Connection) -> AppResult<Vec<RevisionRecord>> {
-    let mut statement = connection.prepare(
-        "SELECT id, snapshot, created_at_ms
-         FROM revisions
-         ORDER BY created_at_ms DESC, id DESC
-         LIMIT ?1",
-    )?;
-    let rows = statement.query_map([REVISION_PREVIEW_LIMIT], |row| {
-        Ok(RevisionRecord {
-            created_at_ms: row.get::<_, i64>(2)? as u64,
-            id: row.get(0)?,
-            snapshot: row.get(1)?,
         })
     })?;
 
@@ -705,10 +767,16 @@ mod tests {
         std::env::temp_dir().join(format!("fablecraft-{label}-{}.fable", Uuid::new_v4()))
     }
 
+    fn revision_body(path: &Path, id: &str) -> String {
+        open_connection(path).unwrap().query_row(
+            "SELECT snapshot FROM revisions WHERE id = ?1", [id], |row| row.get(0),
+        ).unwrap()
+    }
+
     #[test]
     fn existing_connection_never_recreates_a_missing_document() {
         let path = temp_document_path("missing-connection");
-        assert!(super::open_connection(&path, false).is_err());
+        assert!(super::open_connection(&path).is_err());
         assert!(!path.exists());
     }
 
@@ -756,8 +824,173 @@ mod tests {
         let opened = DocumentRepository::open(path.clone()).expect("document should open");
 
         assert_eq!(opened.document_id, created.document_id);
+        assert_eq!(opened.created_at_ms, created.created_at_ms);
 
         fs::remove_file(path).expect("temp file should be removable");
+    }
+
+    #[test]
+    fn migrates_version_two_and_protects_manuscript_from_partial_and_legacy_writers() {
+        let path = temp_document_path("manuscript-migration");
+        let mut legacy = Connection::open(&path).unwrap();
+        for migration in &super::migrations::MIGRATIONS[..2] {
+            legacy.execute_batch(migration).unwrap();
+        }
+        legacy.pragma_update(None, "user_version", 2).unwrap();
+        super::seed_document(&mut legacy).unwrap();
+        legacy.execute(
+            "INSERT INTO revisions (id, snapshot, created_at_ms) VALUES ('legacy', '{}', 1)",
+            [],
+        ).unwrap();
+        drop(legacy);
+
+        let original = DocumentRepository::load(path.clone()).unwrap();
+        assert!(original.manuscript.is_none());
+        assert_eq!(original.revisions[0].id, "legacy");
+        let mut editable = EditableDocumentSnapshot::from(&original);
+        let id = Uuid::new_v4().to_string();
+        let passage = super::manuscript::Passage {
+            id: Uuid::new_v4().to_string(),
+            from: 2,
+            to: 4,
+            target_card_ids: vec![original.cards[0].id.clone()],
+        };
+        editable.manuscript = Some(super::manuscript::Manuscript {
+            id: id.clone(),
+            content_json: serde_json::json!({
+                "type": "doc",
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": "a😀b"}]}]
+            }).to_string(),
+            passages: vec![passage.clone()],
+        });
+        let save = DocumentRepository::save(path.clone(), editable).unwrap();
+        let reopened = DocumentRepository::load(path.clone()).unwrap();
+        assert_eq!(reopened.manuscript.as_ref().unwrap().passages[0].id, passage.id);
+        assert_eq!(reopened.manuscript.as_ref().unwrap().id, id);
+        assert!(revision_body(&path, &reopened.revisions[0].id).contains(&passage.id));
+        assert!(!revision_body(&path, &reopened.revisions[1].id).contains("manuscript"));
+
+        let connection = Connection::open(&path).unwrap();
+        let legacy_error = connection.execute("DELETE FROM cards", []).unwrap_err();
+        assert!(legacy_error.to_string().contains("Update Fablecraft"));
+        let mut partial = EditableDocumentSnapshot::from(&reopened);
+        partial.manuscript = None;
+        partial.manuscript_aware = false;
+        assert_eq!(DocumentRepository::save(path.clone(), partial).unwrap_err().code, "manuscript_aware_writer_required");
+
+        let mut invalid = EditableDocumentSnapshot::from(&reopened);
+        invalid.manuscript.as_mut().unwrap().passages[0].from = 3; // Inside the emoji.
+        assert_eq!(DocumentRepository::save(path.clone(), invalid).unwrap_err().code, "invalid_manuscript");
+        let mut invalid = EditableDocumentSnapshot::from(&reopened);
+        invalid.manuscript.as_mut().unwrap().passages[0].target_card_ids = vec!["missing".into()];
+        assert_eq!(DocumentRepository::save(path.clone(), invalid).unwrap_err().code, "invalid_manuscript");
+
+        connection.execute("UPDATE manuscript SET passages_json = 'invalid JSON'", []).unwrap();
+        let repaired = DocumentRepository::load(path.clone()).unwrap();
+        assert_eq!(repaired.revisions[0].id, save.revision_id);
+        let prose = repaired.manuscript.unwrap();
+        assert!(prose.content_json.contains("a😀b"));
+        assert!(prose.passages.is_empty());
+
+        let mut clear = EditableDocumentSnapshot::from(&reopened);
+        clear.manuscript = None;
+        DocumentRepository::save(path.clone(), clear).unwrap();
+        assert!(DocumentRepository::load(path.clone()).unwrap().manuscript.is_none());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn legacy_manuscript_links_resolve_to_the_last_card_per_span() {
+        let path = temp_document_path("legacy-manuscript-overlaps");
+        DocumentRepository::create(path.clone()).unwrap();
+        let initial = DocumentRepository::load(path.clone()).unwrap();
+        let root = initial.cards[0].id.clone();
+        let second = Uuid::new_v4().to_string();
+        let mut editable = EditableDocumentSnapshot::from(&initial);
+        editable.cards.push(CardRecord {
+            id: second.clone(), document_id: editable.document_id.clone(), card_type: DEFAULT_CARD_TYPE.into(),
+            parent_id: None, order_index: 1,
+        });
+        editable.contents.push(CardContentRecord {
+            card_id: second.clone(), content_json: NEW_CARD_EDITOR_DOCUMENT.into(),
+        });
+        DocumentRepository::save(path.clone(), editable).unwrap();
+
+        let old = Uuid::new_v4().to_string();
+        let new = Uuid::new_v4().to_string();
+        let content = serde_json::json!({
+            "type": "doc", "content": [{"type": "paragraph", "content": [{"type":"text","text":"Alpha beta gamma."}]}]
+        });
+        let legacy = serde_json::json!([
+            {"id":old, "from":1, "to":18, "targetCardIds":[root, second]},
+            {"id":new, "from":7, "to":11, "targetCardIds":[root]},
+        ]);
+        let connection = Connection::open(&path).unwrap();
+        connection.execute("INSERT INTO manuscript VALUES (1, ?1, ?2, ?3)",
+            params![Uuid::new_v4().to_string(), content.to_string(), legacy.to_string()]).unwrap();
+        let loaded = DocumentRepository::load(path.clone()).unwrap();
+        let mut passages = loaded.manuscript.as_ref().unwrap().passages.clone();
+        passages.sort_by_key(|p| p.from);
+        assert_eq!(passages.len(), 3);
+        assert_eq!((passages[0].from, passages[0].to, &passages[0].id), (1, 7, &old));
+        assert_eq!(passages[0].target_card_ids, vec![second.clone()]);
+        assert_eq!((passages[1].from, passages[1].to, &passages[1].id), (7, 11, &new));
+        assert_eq!(passages[1].target_card_ids, vec![root]);
+        assert_eq!((passages[2].from, passages[2].to), (11, 18));
+        assert_eq!(passages[2].target_card_ids, vec![second]);
+        let reopened = DocumentRepository::load(path.clone()).unwrap().manuscript.unwrap();
+        assert!(reopened.passages.iter().any(|p| p.id == passages[2].id));
+
+        let mut invalid = EditableDocumentSnapshot::from(&loaded);
+        let links = &mut invalid.manuscript.as_mut().unwrap().passages;
+        links.iter_mut().find(|p| p.id == new).unwrap().from = 5;
+        assert_eq!(DocumentRepository::save(path.clone(), invalid).unwrap_err().code, "invalid_manuscript");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rejects_future_file_versions_before_opening() {
+        let path = temp_document_path("future-version");
+        DocumentRepository::create(path.clone()).unwrap();
+        let connection = Connection::open(&path).unwrap();
+        connection.pragma_update(None, "user_version", 999).unwrap();
+        assert_eq!(DocumentRepository::open(path.clone()).unwrap_err().code, "unsupported_document_version");
+        assert_eq!(DocumentRepository::load(path.clone()).unwrap_err().code, "unsupported_document_version");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn serializes_competing_writers_on_the_same_base_revision() {
+        use std::sync::{Arc, Barrier};
+        let path = temp_document_path("competing-manuscript-writes");
+        DocumentRepository::create(path.clone()).unwrap();
+        let original = DocumentRepository::load(path.clone()).unwrap();
+        let mut first = EditableDocumentSnapshot::from(&original);
+        first.manuscript = Some(super::manuscript::Manuscript {
+            id: Uuid::new_v4().to_string(), content_json: NEW_CARD_EDITOR_DOCUMENT.to_string(), passages: vec![],
+        });
+        DocumentRepository::save(path.clone(), first).unwrap();
+        let saved = DocumentRepository::load(path.clone()).unwrap();
+        let gate = Arc::new(Barrier::new(2));
+        let attempts: Vec<_> = ["one", "two"].into_iter().map(|text| {
+            let path = path.clone();
+            let gate = gate.clone();
+            let mut candidate = EditableDocumentSnapshot::from(&saved);
+            super::manuscript::edit(candidate.manuscript.as_mut().unwrap(), 1, 1,
+                &[serde_json::json!({"type": "text", "text": text})]).unwrap();
+            std::thread::spawn(move || {
+                gate.wait();
+                DocumentRepository::save(path, candidate)
+            })
+        }).collect();
+        let results: Vec<_> = attempts.into_iter().map(|attempt| attempt.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(results.iter().filter_map(|result| result.as_ref().err()).next().unwrap().code,
+            "stale_document_revision");
+        let current = DocumentRepository::load(path.clone()).unwrap();
+        assert_eq!(current.revisions.len(), 1);
+        assert_eq!(current.revisions[0].id, results.iter().find_map(|result| result.as_ref().ok()).unwrap().revision_id);
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -777,6 +1010,9 @@ mod tests {
         let result = DocumentRepository::save(
             path.clone(),
             EditableDocumentSnapshot {
+                base_revision_id: None,
+                manuscript_aware: true,
+                manuscript: None,
                 cards: vec![
                     root_card.clone(),
                     CardRecord {
@@ -820,6 +1056,9 @@ mod tests {
         let snapshot = DocumentRepository::load(path.clone()).unwrap();
         let root = snapshot.cards[0].clone();
         let mut editable = EditableDocumentSnapshot {
+            base_revision_id: None,
+            manuscript_aware: true,
+            manuscript: None,
             document_id: snapshot.summary.document_id.clone(),
             cards: vec![root.clone(), CardRecord {
                 id: "anchored-child".into(), document_id: snapshot.summary.document_id,
@@ -837,13 +1076,14 @@ mod tests {
         DocumentRepository::save(path.clone(), editable.clone()).unwrap();
         let loaded = DocumentRepository::load(path.clone()).unwrap();
         assert!(loaded.contents.iter().find(|content| content.card_id == root.id).unwrap().content_json.contains("passageAnchor"));
-        assert!(loaded.revisions[0].snapshot.contains("passageAnchor"));
+        assert!(revision_body(&path, &loaded.revisions[0].id).contains("passageAnchor"));
+        editable.base_revision_id = Some(loaded.revisions[0].id.clone());
         editable.cards.retain(|card| card.id != "anchored-child");
         editable.contents.retain(|content| content.card_id != "anchored-child");
         DocumentRepository::save(path.clone(), editable).unwrap();
         let loaded = DocumentRepository::load(path.clone()).unwrap();
         assert!(!loaded.contents[0].content_json.contains("passageAnchor"));
-        assert!(!loaded.revisions[0].snapshot.contains("passageAnchor"));
+        assert!(!revision_body(&path, &loaded.revisions[0].id).contains("passageAnchor"));
         fs::remove_file(path).unwrap();
     }
 
@@ -864,6 +1104,9 @@ mod tests {
         DocumentRepository::save(
             path.clone(),
             EditableDocumentSnapshot {
+                base_revision_id: None,
+                manuscript_aware: true,
+                manuscript: None,
                 cards: vec![
                     root_card.clone(),
                     CardRecord {
