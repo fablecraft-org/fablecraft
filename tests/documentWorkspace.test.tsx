@@ -609,7 +609,7 @@ describe("DocumentWorkspace", () => {
     await act(async () => { useInteractionStore.getState().setActiveCardId("a-child"); });
     expect(labels()).toEqual(["B01", "D01"]);
     await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "-", metaKey: true }));
+      dispatchNativeMenuAction("view-wide-lens");
     });
     expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(7);
     await act(async () => { root.unmount(); });
@@ -1921,7 +1921,7 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it.each(["normal", "focused"])("keeps the start of oversized cards visible when entering editing in %s", async (view) => {
+  it.each(["normal", "large"])("keeps the start of oversized cards visible when entering editing in %s", async (view) => {
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
       value: 720,
@@ -1955,7 +1955,7 @@ describe("DocumentWorkspace", () => {
       root.render(<DocumentWorkspace document={snapshot.summary} />);
     });
 
-    if (view === "focused") await act(async () => { dispatchNativeMenuAction("view-focused"); });
+    if (view === "large") await act(async () => { dispatchNativeMenuAction("view-large"); });
 
     await act(async () => {
       window.dispatchEvent(
@@ -2068,13 +2068,7 @@ describe("DocumentWorkspace", () => {
     expect(container.querySelector('[data-testid="active-card-shell"]')).not.toBeNull();
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const overviewCards = Array.from(
@@ -2223,14 +2217,7 @@ describe("DocumentWorkspace", () => {
     });
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const connectors = Array.from(
@@ -2305,14 +2292,7 @@ describe("DocumentWorkspace", () => {
     ) as HTMLDivElement | null;
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const activeOverviewCard = () =>
@@ -2406,14 +2386,7 @@ describe("DocumentWorkspace", () => {
     });
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const activeOverviewCard = Array.from(
@@ -2447,14 +2420,7 @@ describe("DocumentWorkspace", () => {
     expect(useInteractionStore.getState().activeCardId).toBe("card-a");
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const nextActiveOverviewCard = Array.from(
@@ -2683,14 +2649,7 @@ describe("DocumentWorkspace", () => {
     });
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const overviewCards = Array.from(
@@ -2724,59 +2683,7 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("shows focused direction hints only for existing navigation destinations", async () => {
-    const snapshot = makeDocumentSnapshot();
-    snapshot.cards.push(
-      { ...snapshot.cards[2]!, id: "card-c", orderIndex: 2 },
-      { ...snapshot.cards[2]!, id: "child-b", parentId: "card-b", orderIndex: 0 },
-    );
-    useDocumentStore.getState().hydrateSnapshot(snapshot);
-    useInteractionStore.getState().setActiveCardId("card-b");
-    useAppStore.setState({ mode: "navigation" });
-    loadCurrentDocumentSnapshot.mockResolvedValue(snapshot);
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
-    const directions = () => Array.from(container.querySelectorAll('[data-testid^="focused-chevron-"]'))
-      .map((element) => element.getAttribute("data-testid")!.replace("focused-chevron-", "")).sort();
-    const press = async (key: string) => {
-      await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
-    };
-    expect(directions()).toEqual([]);
-    await act(async () => { dispatchNativeMenuAction("view-focused"); });
-    expect(directions()).toEqual(["down", "left", "right", "up"]);
-    const hints = container.querySelector('[data-testid="focused-navigation-hints"]') as HTMLElement;
-    expect(hints.getAttribute("aria-hidden")).toBe("true");
-    expect(hints.className).toContain("pointer-events-none");
-    expect(hints.querySelector("svg")?.getAttribute("stroke")).toBe("var(--fc-color-overview-connector)");
-    await press("ArrowRight");
-    expect(useInteractionStore.getState().activeCardId).toBe("child-b");
-    expect(directions()).toEqual(["left"]);
-    await press("ArrowLeft");
-    expect(directions()).toEqual(["down", "left", "right", "up"]);
-    await press("ArrowUp");
-    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
-    expect(directions()).toEqual(["down", "left"]);
-    await press("ArrowDown");
-    await press("ArrowDown");
-    expect(useInteractionStore.getState().activeCardId).toBe("card-c");
-    expect(directions()).toEqual(["left", "up"]);
-    await act(async () => { dispatchNativeMenuAction("view-normal"); });
-    expect(directions()).toEqual([]);
-    await act(async () => { dispatchNativeMenuAction("view-wide-lens"); });
-    expect(directions()).toEqual([]);
-    await act(async () => { dispatchNativeMenuAction("view-focused"); });
-    await press("ArrowLeft");
-    expect(useInteractionStore.getState().activeCardId).toBe("card-root");
-    // A root card can still move left to its document context.
-    expect(directions()).toEqual(["left", "right"]);
-    await press("ArrowLeft");
-    expect(directions()).toEqual([]);
-    await act(async () => { root.unmount(); });
-  });
-
-  it("shows only same-parent siblings in Focused, including roots, regardless of the Normal neighbor preference", async () => {
+  it("honors the neighbor preference in Large while keeping vertical navigation available", async () => {
     let snapshot = makeDocumentSnapshot();
     snapshot.cards.push(
       { ...snapshot.cards[2]!, id: "card-c", orderIndex: 2 },
@@ -2799,11 +2706,8 @@ describe("DocumentWorkspace", () => {
     const previews = () => Array.from(container.querySelectorAll<HTMLElement>('[data-testid="tree-card"]'));
     const visibleText = () => previews().map((card) => contentText(card.dataset.contentJson!)).sort();
     expect(visibleText()).toEqual([]);
-    await act(async () => { dispatchNativeMenuAction("view-focused"); });
-    expect(visibleText()).toEqual(["card-a", "card-c"]);
-    expect(previews().every((card) => Number(card.dataset.x) === 0)).toBe(true);
-    expect(Number(previews().find((card) => contentText(card.dataset.contentJson!) === "card-a")!.dataset.y)).toBeLessThan(0);
-    expect(Number(previews().find((card) => contentText(card.dataset.contentJson!) === "card-c")!.dataset.y)).toBeGreaterThan(0);
+    await act(async () => { dispatchNativeMenuAction("view-large"); });
+    expect(visibleText()).toEqual([]);
     const stage = container.querySelector('[data-testid="document-stage"]') as HTMLElement;
     expect(stage.style.getPropertyValue("--fc-card-width")).toBe("880px");
     expect(container.querySelector('[data-testid="empty-child-gap"]')).toBeNull();
@@ -2811,7 +2715,7 @@ describe("DocumentWorkspace", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     });
     expect(useInteractionStore.getState().activeCardId).toBe("card-c");
-    expect(visibleText()).toEqual(["card-a", "card-b"]);
+    expect(visibleText()).toEqual([]);
     // Navigation can still cross parent groups; the newly selected group alone is visible.
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
@@ -2819,13 +2723,13 @@ describe("DocumentWorkspace", () => {
     expect(useInteractionStore.getState().activeCardId).toBe("cousin");
     expect(visibleText()).toEqual([]);
     await act(async () => { useInteractionStore.getState().setActiveCardId("card-root"); });
-    expect(visibleText()).toEqual(["other-root"]);
+    expect(visibleText()).toEqual([]);
     await act(async () => { dispatchNativeMenuAction("view-normal"); });
     expect(visibleText()).toEqual([]);
     await act(async () => { root.unmount(); });
   });
 
-  it.each(["keyboard", "menu"])("steps through three view modes using %s while preserving navigation", async (source) => {
+  it.each(["keyboard", "menu"])("steps through three writing sizes and Wide Lens using %s while preserving navigation", async (source) => {
     const snapshot = makeDocumentSnapshot();
     useDocumentStore.getState().hydrateSnapshot(snapshot);
     useInteractionStore.getState().setActiveCardId("card-root");
@@ -2844,18 +2748,22 @@ describe("DocumentWorkspace", () => {
     };
     expect(stage.dataset.viewMode).toBe("normal");
     const normalWidth = stage.style.getPropertyValue("--fc-card-width");
+    const normalSize = stage.style.getPropertyValue("--fc-content-size");
+    expect(stage.dataset.columns).toBe("3");
     await zoom("in");
-    expect(stage.dataset.viewMode).toBe("focused");
+    expect(stage.dataset.viewMode).toBe("large");
     expect(stage.style.getPropertyValue("--fc-card-width")).toBe("880px");
+    expect(parseFloat(stage.style.getPropertyValue("--fc-content-size"))).toBeGreaterThan(parseFloat(normalSize));
+    expect(stage.dataset.columns).toBe("1");
     expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(0);
     expect(container.querySelector('[data-testid="empty-child-gap"]')).toBeNull();
     expect((container.querySelector('[data-testid="active-card-shell"]') as HTMLElement).style.left).toBe("calc(50% + 0px)");
     await zoom("in");
-    expect(stage.dataset.viewMode).toBe("focused");
+    expect(stage.dataset.viewMode).toBe("large");
     for (const [key, selected] of [["ArrowRight", "card-a"], ["ArrowDown", "card-b"], ["ArrowLeft", "card-root"]]) {
       await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
       expect(useInteractionStore.getState().activeCardId).toBe(selected);
-      expect(stage.dataset.viewMode).toBe("focused");
+      expect(stage.dataset.viewMode).toBe("large");
       expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(selected === "card-root" ? 0 : 1);
     }
     await act(async () => {
@@ -2872,12 +2780,19 @@ describe("DocumentWorkspace", () => {
     expect(stage.style.getPropertyValue("--fc-card-width")).toBe(normalWidth);
     expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(2);
     await zoom("out");
+    expect(stage.dataset.viewMode).toBe("compact");
+    expect(stage.dataset.columns).toBe("4");
+    expect(parseFloat(stage.style.getPropertyValue("--fc-card-width"))).toBeLessThan(parseFloat(normalWidth));
+    expect(parseFloat(stage.style.getPropertyValue("--fc-content-size"))).toBeLessThan(parseFloat(normalSize));
+    await zoom("out");
     expect(stage.dataset.viewMode).toBe("wide-lens");
     expect(container.querySelectorAll('[data-testid="tree-card"]')).toHaveLength(3);
     await zoom("out");
     expect(stage.dataset.viewMode).toBe("wide-lens");
-    await act(async () => { dispatchNativeMenuAction("view-focused"); });
-    expect(stage.dataset.viewMode).toBe("focused");
+    await act(async () => { dispatchNativeMenuAction("view-compact"); });
+    expect(stage.dataset.viewMode).toBe("compact");
+    await act(async () => { dispatchNativeMenuAction("view-large"); });
+    expect(stage.dataset.viewMode).toBe("large");
     await act(async () => { dispatchNativeMenuAction("view-normal"); });
     expect(stage.dataset.viewMode).toBe("normal");
     await act(async () => { dispatchNativeMenuAction("view-wide-lens"); });
@@ -2923,9 +2838,8 @@ describe("DocumentWorkspace", () => {
       root.render(<DocumentWorkspace document={snapshot.summary} />);
     });
 
-    await act(async () => {
-      dispatchNativeMenuAction("zoom-out");
-    });
+    await act(async () => { dispatchNativeMenuAction("zoom-out"); });
+    await act(async () => { dispatchNativeMenuAction("zoom-out"); });
 
     expect(container.querySelector('[data-testid="active-card-shell"]')).toBeNull();
     expect(
@@ -2988,9 +2902,8 @@ describe("DocumentWorkspace", () => {
       root.render(<DocumentWorkspace document={snapshot.summary} />);
     });
 
-    await act(async () => {
-      dispatchNativeMenuAction("zoom-out");
-    });
+    await act(async () => { dispatchNativeMenuAction("zoom-out"); });
+    await act(async () => { dispatchNativeMenuAction("zoom-out"); });
 
     expect(container.querySelector('[data-testid="active-card-shell"]')).toBeNull();
     expect(useAppStore.getState().mode).toBe("navigation");
@@ -3114,14 +3027,7 @@ describe("DocumentWorkspace", () => {
     });
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const overviewCards = Array.from(
@@ -3135,14 +3041,7 @@ describe("DocumentWorkspace", () => {
     expect(useInteractionStore.getState().activeCardId).toBe("card-a");
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "=",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-normal");
     });
 
     const inactiveCards = Array.from(
@@ -3203,14 +3102,7 @@ describe("DocumentWorkspace", () => {
     });
 
     await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "-",
-          metaKey: true,
-        }),
-      );
+      dispatchNativeMenuAction("view-wide-lens");
     });
 
     const overviewCards = Array.from(
@@ -3972,7 +3864,7 @@ describe("DocumentWorkspace", () => {
     });
   });
 
-  it("keeps the final remaining card and empties it when deleting in navigation mode", async () => {
+  it("shows the editable placeholder after deleting the final card", async () => {
     const snapshot = {
       ...makeDocumentSnapshot(),
       cards: [
@@ -4020,12 +3912,11 @@ describe("DocumentWorkspace", () => {
       );
     });
 
-    const nextSnapshot = useDocumentStore.getState().snapshot;
-
-    expect(nextSnapshot?.cards.map((card) => card.id)).toEqual(["card-root"]);
-    expect(
-      isContentEffectivelyEmpty(nextSnapshot?.contents[0]?.contentJson ?? ""),
-    ).toBe(true);
+    expect(useDocumentStore.getState().snapshot?.cards).toEqual([]);
+    expect(useDocumentStore.getState().snapshot?.contents).toEqual([]);
+    const draft = container.querySelector('[data-testid="card-editor"]');
+    expect(draft?.getAttribute("data-placeholder")).toBe("Your story starts here");
+    expect(draft?.getAttribute("data-editing")).toBe("true");
 
     await act(async () => {
       root.unmount();
@@ -4353,7 +4244,7 @@ describe("DocumentWorkspace", () => {
   });
 
   it.each(["metaKey", "ctrlKey"].flatMap(modifier =>
-    ["normal", "focused", "wide-lens"].map(view => [modifier, view]),
+    ["normal", "large", "wide-lens"].map(view => [modifier, view]),
   ))("jumps to sibling boundaries and the branch root with %s in %s", async (modifier, view) => {
     const snapshot = makeDocumentSnapshot();
     snapshot.cards.push(
@@ -4370,7 +4261,7 @@ describe("DocumentWorkspace", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     await act(async () => { root.render(<DocumentWorkspace document={snapshot.summary} />); });
-    await act(async () => { dispatchNativeMenuAction(view === "normal" ? "view-normal" : view === "focused" ? "view-focused" : "view-wide-lens"); });
+    await act(async () => { dispatchNativeMenuAction(view === "normal" ? "view-normal" : view === "large" ? "view-large" : "view-wide-lens"); });
     const before = useDocumentStore.getState().snapshot;
     const press = async (key: string, modified = true) => {
       const event = new KeyboardEvent("keydown", { key, [modifier]: modified, bubbles: true, cancelable: true });

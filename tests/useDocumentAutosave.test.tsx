@@ -102,9 +102,12 @@ describe("useDocumentAutosave", () => {
     await act(async () => root.unmount());
   });
 
-  it("keeps the local manuscript and stops autosave after an MCP write wins the revision", async () => {
+  it.each([
+    "stale_document_revision",
+    "unsupported_document_version",
+  ])("keeps the local manuscript and stops autosave on %s", async (code) => {
     saveDocumentSnapshotAtPath.mockRejectedValue({
-      code: "stale_document_revision", message: "Changed on disk",
+      code, message: "Changed on disk",
     });
     const root = createRoot(document.createElement("div"));
     const initial = makeDocumentSnapshot();

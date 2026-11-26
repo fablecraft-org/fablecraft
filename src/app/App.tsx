@@ -1212,16 +1212,22 @@ export function App() {
       run: () => runPaletteAction(() => dispatchNativeMenuAction("view-wide-lens")),
     },
     {
+      id: "view-compact",
+      keywords: ["zoom", "writing", "tree", "view"],
+      label: "Compact",
+      run: () => runPaletteAction(() => dispatchNativeMenuAction("view-compact")),
+    },
+    {
       id: "view-normal",
       keywords: ["zoom", "writing", "neighbors", "view"],
       label: "Normal",
       run: () => runPaletteAction(() => dispatchNativeMenuAction("view-normal")),
     },
     {
-      id: "view-focused",
-      keywords: ["zoom", "writing", "document", "distraction", "view"],
-      label: "Focused",
-      run: () => runPaletteAction(() => dispatchNativeMenuAction("view-focused")),
+      id: "view-large",
+      keywords: ["zoom", "writing", "tree", "view"],
+      label: "Large",
+      run: () => runPaletteAction(() => dispatchNativeMenuAction("view-large")),
     },
     {
       id: "enable-codex",
@@ -1291,10 +1297,10 @@ export function App() {
       label: "Request a Feature",
       run: () => runPaletteAction(() => openFeedbackDialog("feature")),
     },
-  ].filter((item) => workspacePane === "tree" || (item.id !== "export-markdown" && item.id !== "export-html"));
+  ].filter((item) => workspacePane === "tree" || (!item.id.startsWith("view-") && item.id !== "export-markdown" && item.id !== "export-html"));
 
   for (const [id, label] of manuscriptCommands) {
-    const needsManuscript = id === "remove-manuscript" || id === "export-manuscript-markdown"
+    const needsManuscript = id === "export-manuscript-markdown"
       || id === "link-manuscript-passage";
     const eligible = id !== "link-manuscript-passage" || manuscriptLinkEligible;
     if (!activeSnapshot || (needsManuscript && !activeSnapshot.manuscript) ||

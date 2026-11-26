@@ -136,13 +136,8 @@ pub async fn rename_fable_document(
     let document_path = PathBuf::from(path);
     let next_path = renamed_fable_document_path(&document_path, &name)?;
 
-    if next_path != document_path {
-        fs::rename(&document_path, &next_path)
-            .map_err(AppError::from)
-            .map_err(AppErrorPayload::from)?;
-    }
-
-    let summary = document_worker(move || DocumentRepository::open(next_path)).await?;
+    let source_path = document_path.clone();
+    let summary = document_worker(move || rename_document_on_disk(source_path, next_path)).await?;
     let current_path = current_document_path(&state).ok();
 
     if current_path.as_ref() == Some(&document_path) {
@@ -150,6 +145,17 @@ pub async fn rename_fable_document(
     }
 
     Ok(summary)
+}
+
+fn rename_document_on_disk(
+    path: PathBuf,
+    next_path: PathBuf,
+) -> Result<DocumentSummary, AppErrorPayload> {
+    if next_path != path {
+        DocumentRepository::check_file_compatibility(&path)?;
+        fs::rename(path, &next_path).map_err(AppError::from)?;
+    }
+    DocumentRepository::open(next_path)
 }
 
 #[tauri::command]
@@ -562,11 +568,32 @@ fn update_app_state(state: &State<'_, AppState>, summary: &DocumentSummary) {
 mod tests {
     use super::{
         create_untitled_document_in_directory, existing_document_paths,
-        list_fable_directory_for_document, renamed_fable_document_path,
+        list_fable_directory_for_document, rename_document_on_disk, renamed_fable_document_path,
         validate_deletable_fable_document_path,
     };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn rename_leaves_a_future_format_file_in_place() {
+        let folder = temp_folder("future-format-rename");
+        let source = folder.join("source.fable");
+        let destination = folder.join("destination.fable");
+        crate::storage::DocumentRepository::create(source.clone()).unwrap();
+        let connection = rusqlite::Connection::open(&source).unwrap();
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        connection.pragma_update(None, "user_version", version + 1).unwrap();
+        drop(connection);
+        let bytes = fs::read(&source).unwrap();
+
+        let error = rename_document_on_disk(source.clone(), destination.clone()).unwrap_err();
+        assert_eq!(error.code, "unsupported_document_version");
+        assert_eq!(fs::read(source).unwrap(), bytes);
+        assert!(!destination.exists());
+        fs::remove_dir_all(folder).unwrap();
+    }
 
     #[test]
     fn directory_creation_persists_blank_files_without_overwriting_existing_documents() {

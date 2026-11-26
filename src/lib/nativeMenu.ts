@@ -40,7 +40,8 @@ export type NativeMenuAction =
   | "undo"
   | "view-wide-lens"
   | "view-normal"
-  | "view-focused"
+  | "view-compact"
+  | "view-large"
   | "zoom-in"
   | "zoom-out";
 

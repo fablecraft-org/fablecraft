@@ -667,6 +667,22 @@ describe("App native menu handling", () => {
     });
   });
 
+  it("keeps the active document when a native open targets a newer format", async () => {
+    const root = createRoot(document.createElement("div"));
+    const current = makeDocumentSnapshot();
+    useAppStore.getState().setDocument(current.summary);
+    useDocumentStore.getState().hydrateSnapshot(current);
+    const message = "This document uses a newer Fablecraft file format (9). Update Fablecraft to open it.";
+    mocks.openDocumentAtPath.mockRejectedValueOnce({ code: "unsupported_document_version", message });
+    await act(async () => { root.render(<App />); });
+    await act(async () => { dispatchNativeOpenDocuments(["/tmp/future.fable"]); });
+
+    expect(useAppStore.getState().activeDocument?.path).toBe(current.summary.path);
+    expect(useDocumentStore.getState().snapshot?.summary.path).toBe(current.summary.path);
+    expect(useAppStore.getState().notice).toEqual({ tone: "error", message });
+    await act(async () => root.unmount());
+  });
+
   it("remembers beta notice dismissal across fresh app mounts and preference resets", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -949,7 +965,8 @@ describe("App native menu handling", () => {
   });
 
   it.each([
-    ["Wide Lens", "view-wide-lens"], ["Normal", "view-normal"], ["Focused", "view-focused"],
+    ["Wide Lens", "view-wide-lens"], ["Compact", "view-compact"],
+    ["Normal", "view-normal"], ["Large", "view-large"],
   ] as const)("selects %s directly from the command palette", async (label, action) => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -996,7 +1013,8 @@ describe("App native menu handling", () => {
 
     expect(container.textContent).toContain("Normal");
     expect(container.textContent).toContain("Wide Lens");
-    expect(container.textContent).toContain("Focused");
+    expect(container.textContent).toContain("Compact");
+    expect(container.textContent).toContain("Large");
 
     const zoomedOutCommand = Array.from(container.querySelectorAll("button")).find((node) =>
       node.textContent?.includes(label),

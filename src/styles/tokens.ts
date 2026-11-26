@@ -158,12 +158,28 @@ const lineHeightTokens = {
 
 export const writingLayoutTokens = {
   minimumCardWidth: 360,
-  focusedCardWidth: 880,
   maximumColumns: 4,
   margin: 24,
   spacing: 24,
   verticalInset: 48,
 };
+
+export const writingZoomLevels = ["compact", "normal", "large"] as const;
+export type WritingZoom = (typeof writingZoomLevels)[number];
+
+export const writingZoomTokens = {
+  compact: { scale: 0.85, minimumCardWidth: 272, maximumCardWidth: 352, manuscriptWidth: 612 },
+  normal: { scale: 1, manuscriptWidth: 720 },
+  large: { scale: 1.25, maximumColumns: 1, maximumCardWidth: 880, manuscriptWidth: 900 },
+};
+
+export function writingTypography(preferences: UiPreferences, zoom: WritingZoom) {
+  const { scale } = writingZoomTokens[zoom];
+  return {
+    size: `${parseFloat(textSizeTokens[preferences.textSize]) * scale}rem`,
+    lineHeight: `${parseFloat(lineHeightTokens[preferences.lineHeight]) * scale}rem`,
+  };
+}
 
 const defaultUiPreferences: UiPreferences = {
   font: "sans",
@@ -182,7 +198,6 @@ const uiTokens = {
   directoryCardWidth: 468,
   cardLink: { fontSize: "0.75em", paddingX: 5, paddingY: 1, gap: 2 },
   referenceIconSize: 14,
-  focusedNavigation: { size: 24, inset: 16, topInset: 48, strokeWidth: 2 },
   cardIdentity: {
     badgeWidth: 26,
     badgeHeight: 18,
@@ -278,10 +293,6 @@ function buildCssVariables(preferences: UiPreferences): CssVariableMap {
     "--fc-animation-ms": `${uiTokens.animationMs}ms`,
     "--fc-card-height": `${metrics.cardHeight}px`,
     "--fc-card-width": `${metrics.cardWidth}px`,
-    "--fc-focused-navigation-size": `${uiTokens.focusedNavigation.size}px`,
-    "--fc-focused-navigation-inset": `${uiTokens.focusedNavigation.inset}px`,
-    "--fc-focused-navigation-top-inset": `${uiTokens.focusedNavigation.topInset}px`,
-    "--fc-focused-navigation-stroke-width": `${uiTokens.focusedNavigation.strokeWidth}`,
     "--fc-reference-icon-size": `${uiTokens.referenceIconSize}px`,
     "--fc-card-identity-inset": `${uiTokens.cardIdentity.inset}px`,
     "--fc-card-identity-top": `${uiTokens.cardIdentity.top}px`,
@@ -361,7 +372,6 @@ export { defaultUiPreferences, uiTokens };
 
 export const manuscriptLayoutTokens = {
   proseMinimum: 360,
-  proseMaximum: 720,
   controlGap: 8,
   linkBarWidth: 4,
   panePadding: 32,

@@ -1,6 +1,6 @@
 import { Extension, type Editor } from "@tiptap/core";
 import { Slice, type Node as ProseNode } from "@tiptap/pm/model";
-import { Plugin, PluginKey, TextSelection, type Selection } from "@tiptap/pm/state";
+import { Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
@@ -95,6 +95,7 @@ interface ManuscriptPaneProps {
   reveal: (Range & { request: number }) | null;
   historyAdditions?: readonly HistoryTextRange[];
   onActivate: () => void;
+  onNavigateDirectory: () => boolean;
   onNotice: (message: string) => void;
   choosingCard: boolean;
   typographyKey: string;
@@ -510,7 +511,7 @@ export function ManuscriptPane(props: ManuscriptPaneProps) {
   useLayoutEffect(() => {
     latest.current.onLinkedCardChange(linkedCard);
   }, [linkedCard]);
-  const canLink = Boolean(!readOnly && active && prose && editor && !props.choosingCard && !search &&
+  const canLink = Boolean(!readOnly && visible && active && snapshot.cards.length && prose && editor && !props.choosingCard && !search &&
     hasPassageText(editor.state.doc, selection.from, selection.to));
   useEffect(() => {
     latest.current.onLinkEligibilityChange(canLink);
@@ -528,16 +529,24 @@ export function ManuscriptPane(props: ManuscriptPaneProps) {
       onFocusCapture={props.onActivate}
       onPointerDownCapture={props.onActivate}
       onKeyDown={(event) => {
-        if (event.nativeEvent.isComposing) return;
-        if (event.key === "Escape" && !event.defaultPrevented) {
-          if (search) { setSearch(false); focus(); }
-          else if (editor && searchHighlightKey.getState(editor.state)) {
-            const { head } = editor.state.selection;
-            setSelection(editor, { from: head, to: head });
-          } else return;
-          event.preventDefault();
-          event.stopPropagation();
+        if (event.defaultPrevented || event.nativeEvent.isComposing ||
+          event.keyCode === 229 || editor?.view.composing) return;
+        if (event.key === "Escape" && search) {
+          setSearch(false);
+          focus();
+        } else if (event.key === "Escape" && editor && searchHighlightKey.getState(editor.state)) {
+          const { head } = editor.state.selection;
+          setSelection(editor, { from: head, to: head });
+        } else {
+          if (readOnly || !editor || !(event.target instanceof Node) || !editor.view.dom.contains(event.target)) return;
+          const { selection, doc } = editor.state;
+          const atStart = event.key === "ArrowLeft" && !event.shiftKey && !event.altKey &&
+            !event.metaKey && !event.ctrlKey && selection instanceof TextSelection &&
+            selection.eq(Selection.atStart(doc));
+          if ((event.key !== "Escape" && !atStart) || !props.onNavigateDirectory()) return;
         }
+        event.preventDefault();
+        event.stopPropagation();
       }}
     >
       {search && (

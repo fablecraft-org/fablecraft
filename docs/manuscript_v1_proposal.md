@@ -17,8 +17,8 @@ The writer can keep zero or one manuscript in each local .fable document. The ma
 | Switch views | Tree, Both and Manuscript are directly addressable. Both places the tree on the left and manuscript on the right. Preserve each pane’s selection, scroll position and tree zoom during switches. |
 | Enter Both | Directional entry focuses the newly revealed pane. Direct menu entry to Both preserves focus. A single-pane command focuses its destination. Clicking a pane activates it. Announce the active pane without adding an outline beside the separator. |
 | Resize | Start around 40% tree and 60% prose. A single-line divider is adjustable by pointer and keyboard. Keep a readable maximum text width. Compute the Both breakpoint from the minimum readable widths of one tree card and the manuscript, their padding and the divider. Below it, show the active pane only. Left goes directly to Tree and Right directly to Manuscript. Direct Both is unavailable with an explanation. Preserve both carets/selections and restore a previously requested split on widening unless the writer explicitly chose a single-pane layout. Test on either side of the breakpoint and at 408 px. |
-| Return to a document | Remember layout and split ratio per document locally. Restore Tree if the manuscript has been removed. Layout, focus, cursor and zoom are presentation state outside document undo. |
-| Remove Manuscript | Explicit command confirms removal of prose and its passage links, then returns to Tree. One undo restores both. Clearing all prose during editing leaves an empty manuscript. |
+| Return to a document | Remember the layout, active pane and split ratio locally for each document, including when the manuscript is blank. Layout, focus, cursor and zoom are presentation state outside document undo. |
+| Clear manuscript | Clearing all prose in the editor leaves an empty manuscript in place and clears its passage links. One undo restores the prose and links. |
 
 ## Keyboard and command routing
 
@@ -100,7 +100,7 @@ Allow AI edits while the manuscript is open. Route them through the validated do
 
 ## Acceptance scenarios beyond unit coverage
 
-1. Open a pre-manuscript file, visit all three layouts, write the first sentence and reopen. Verify no manuscript was created until the first edit or an explicit creation command. Exercise creation, removal and undo.
+1. Open a pre-manuscript file, visit all three layouts, write the first sentence and reopen. Verify no manuscript was created until the first edit or an explicit creation command. Exercise creation, clearing prose and undo.
 2. Draft a long article, leave the caret midway, browse several cards, change layouts and return. Exercise every transition in the keyboard table, both endpoints, key repeat, a selected passage, and shifted selection keys. Check caret, scroll, independent zoom and key routing. Exercise mouse, keyboard-only, narrow window, dark theme, IME and screen-reader focus.
 3. Link lines 4–7 to A and then lines 6–9 to B. Verify lines 4–5 still activate A and lines 6–9 activate B while the manuscript retains focus. Repeat an existing pairing, cancel target selection in Tree, delete B, undo and reopen. Follow both cards’ backlinks.
 4. With adjacent linked spans, type at their boundaries, replace a whole span, insert a paragraph above, cut and paste part of a linked section and undo. Verify text, links, line ranges and stable identity. Resize and zoom without changing labels.

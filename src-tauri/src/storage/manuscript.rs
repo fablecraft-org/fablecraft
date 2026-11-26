@@ -121,6 +121,146 @@ fn document(prose: &Manuscript) -> AppResult<Value> {
     Ok(doc)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TextBlockRange {
+    pub start_char: usize,
+    pub end_char: usize,
+    pub from: usize,
+    pub to: usize,
+}
+
+pub(crate) struct PlainText {
+    pub text: String,
+    pub character_count: usize,
+    blocks: Vec<TextBlockRange>,
+}
+
+impl PlainText {
+    pub(crate) fn from_manuscript(prose: &Manuscript) -> AppResult<Self> {
+        let mut plain = Self {
+            text: String::new(),
+            character_count: 0,
+            blocks: Vec::new(),
+        };
+        plain.collect(&document(prose)?, 0);
+        Ok(plain)
+    }
+
+    // Return the ProseMirror node size while projecting the text in reading order.
+    // Start at 0 for the doc's content and count wrapper tokens for its children.
+    fn collect(&mut self, node: &Value, start: usize) -> usize {
+        let content = children(node);
+        match kind(node) {
+            "paragraph" | "heading" | "codeBlock" => {
+                if !self.blocks.is_empty() {
+                    self.text.push('\n');
+                    self.character_count += 1;
+                }
+                let start_char = self.character_count;
+                for child in content {
+                    if kind(child) == "hardBreak" {
+                        self.text.push('\n');
+                        self.character_count += 1;
+                    } else {
+                        let text = child["text"].as_str().expect("validated text node");
+                        self.text.push_str(text);
+                        self.character_count += text.encode_utf16().count();
+                    }
+                }
+                let length = self.character_count - start_char;
+                self.blocks.push(TextBlockRange {
+                    start_char,
+                    end_char: self.character_count,
+                    from: start + 1,
+                    to: start + 1 + length,
+                });
+                length + 2
+            }
+            "horizontalRule" => 1,
+            _ => {
+                let content_start = start + usize::from(kind(node) != "doc");
+                let mut next = content_start;
+                for child in content {
+                    next += self.collect(child, next);
+                }
+                next - content_start + 2
+            }
+        }
+    }
+
+    pub(crate) fn byte_index(&self, index: usize) -> AppResult<usize> {
+        let mut offset = 0;
+        for (byte, character) in self.text.char_indices() {
+            if offset == index {
+                return Ok(byte);
+            }
+            offset += character.len_utf16();
+            if offset > index {
+                return Err(invalid(
+                    "A character endpoint splits a UTF-16 surrogate pair.",
+                ));
+            }
+        }
+        if index == offset {
+            return Ok(self.text.len());
+        }
+        Err(invalid(
+            "A character endpoint is past the end of the manuscript.",
+        ))
+    }
+
+    pub(crate) fn block_ranges(&self, start: usize, end: usize) -> Vec<TextBlockRange> {
+        let first = self.blocks.partition_point(|block| block.end_char <= start);
+        self.blocks[first..]
+            .iter()
+            .take_while(|block| block.start_char < end)
+            .filter_map(|block| {
+                let start_char = start.max(block.start_char);
+                let end_char = end.min(block.end_char);
+                (start_char < end_char).then_some(TextBlockRange {
+                    start_char,
+                    end_char,
+                    from: block.from + (start_char - block.start_char),
+                    to: block.to - (block.end_char - end_char),
+                })
+            })
+            .collect()
+    }
+}
+
+pub(crate) fn edit_plain_text(
+    prose: &mut Manuscript,
+    start: usize,
+    end: usize,
+    replacement: &str,
+) -> AppResult<()> {
+    if start > end || replacement.contains(['\r', '\n']) {
+        return Err(invalid(
+            "Choose an ordered range and replacement text without line breaks.",
+        ));
+    }
+    let plain = PlainText::from_manuscript(prose)?;
+    plain.byte_index(start)?;
+    plain.byte_index(end)?;
+    let block = plain
+        .blocks
+        .get(plain.blocks.partition_point(|block| block.end_char < start))
+        .filter(|block| block.start_char <= start && end <= block.end_char)
+        .ok_or_else(|| invalid("Choose a character range within one text block."))?;
+    let insert = if replacement.is_empty() {
+        Vec::new()
+    } else {
+        vec![json!({ "type": "text", "text": replacement })]
+    };
+    edit(
+        prose,
+        block.from + (start - block.start_char),
+        block.from + (end - block.start_char),
+        &insert,
+    )
+}
+
 pub(super) fn size(node: &Value) -> usize {
     match kind(node) {
         "text" => node["text"].as_str().unwrap_or("").encode_utf16().count(),

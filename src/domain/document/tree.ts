@@ -76,7 +76,7 @@ function upsertContentRecord(
 
 export function createChildCard(
   snapshot: DocumentSnapshot,
-  parentId: string,
+  parentId: string | null,
   cardId: string,
 ) {
   const siblingCards = snapshot.cards.filter((card) => card.parentId === parentId);
@@ -558,12 +558,6 @@ export function mergeCardWithNextSibling(
 }
 
 export function deleteCardSubtree(snapshot: DocumentSnapshot, cardId: string) {
-  const remainingRootCards = snapshot.cards.filter((card) => card.parentId === null);
-
-  if (remainingRootCards.length === 1 && remainingRootCards[0]?.id === cardId) {
-    throw new Error("The last root card cannot be deleted.");
-  }
-
   const deletedIds = collectDescendantIds(snapshot.cards, cardId);
   const removedCard = snapshot.cards.find((card) => card.id === cardId);
   const nextCards = snapshot.cards.filter((card) => !deletedIds.has(card.id));

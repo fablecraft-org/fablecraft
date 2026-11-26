@@ -24,7 +24,6 @@ function renderEditor(
 
   const props: ComponentProps<typeof CardEditor> = {
     canCreateStructure: true,
-    canLeaveEditing: true,
     contentJson: contentJsonForPlainText("Hello world"),
     focusPlacement: null,
     isEditing: true,
@@ -854,9 +853,8 @@ describe("CardEditor keyboard behavior", () => {
     });
   });
 
-  it("keeps editing active on Escape for the empty first card", async () => {
+  it("allows Escape on an empty card", async () => {
     const { container, props, root } = renderEditor({
-      canLeaveEditing: false,
       contentJson: '{"type":"doc","content":[{"type":"paragraph"}]}',
     });
 
@@ -875,7 +873,7 @@ describe("CardEditor keyboard behavior", () => {
       );
     });
 
-    expect(props.onRequestNavigation).not.toHaveBeenCalled();
+    expect(props.onRequestNavigation).toHaveBeenCalledOnce();
 
     await act(async () => {
       root.unmount();

@@ -5,7 +5,6 @@ export const manuscriptCommands = [
   ["pane-left", "Focus Pane Left"],
   ["pane-right", "Focus Pane Right"],
   ["write-manuscript", "Write Manuscript"],
-  ["remove-manuscript", "Remove Manuscript"],
   ["link-manuscript-passage", "Link Manuscript Passage"],
   ["import-manuscript-markdown", "Import Manuscript Markdown"],
   ["export-manuscript-markdown", "Export Manuscript Markdown"],

@@ -21,6 +21,7 @@ mod passage_anchors;
 const DEFAULT_CARD_TYPE: &str = "card";
 const NEW_CARD_EDITOR_DOCUMENT: &str =
     r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
+const CURRENT_DOCUMENT_SCHEMA_VERSION: i64 = migrations::MIGRATIONS.len() as i64;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +116,12 @@ pub struct SaveDocumentResult {
 pub struct DocumentRepository;
 
 impl DocumentRepository {
+    pub(crate) fn check_file_compatibility(path: &Path) -> AppResult<()> {
+        validate_fable_path(path)?;
+        open_version_checked_connection(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        Ok(())
+    }
+
     pub fn create(path: PathBuf) -> Result<DocumentSummary, AppErrorPayload> {
         Self::create_inner(path).map_err(AppErrorPayload::from)
     }
@@ -174,7 +181,9 @@ impl DocumentRepository {
 
         let mut connection = open_connection(&path)?;
         run_migrations(&mut connection)?;
-        let summary = summarize_document(&connection, &path)?;
+        let transaction = connection.transaction()?;
+        let summary = summarize_document(&transaction, &path)?;
+        transaction.commit()?;
         history::queue_preparation(path, summary.document_id.clone());
         Ok(summary)
     }
@@ -207,7 +216,8 @@ impl DocumentRepository {
 
         let mut connection = open_connection(&path)?;
         run_migrations(&mut connection)?;
-        build_document_clock(&connection, &path)
+        let transaction = connection.transaction()?;
+        build_document_clock(&transaction, &path)
     }
 
     fn save_inner(
@@ -330,10 +340,7 @@ impl DocumentRepository {
 }
 
 fn open_connection(path: &Path) -> AppResult<Connection> {
-    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-
-    connection.busy_timeout(std::time::Duration::from_secs(5))?;
-    check_version(&connection)?;
+    let (connection, _) = open_version_checked_connection(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     // Keep the database truly single-file. WAL would introduce -wal and -shm sidecars.
     connection.pragma_update(None, "journal_mode", "DELETE")?;
@@ -341,19 +348,31 @@ fn open_connection(path: &Path) -> AppResult<Connection> {
     Ok(connection)
 }
 
+fn open_version_checked_connection(path: &Path, flags: OpenFlags) -> AppResult<(Connection, i64)> {
+    let connection = Connection::open_with_flags(path, flags)?;
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    let version = check_version(&connection)?;
+    Ok((connection, version))
+}
+
 fn check_version(connection: &Connection) -> AppResult<i64> {
     let version = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > migrations::MIGRATIONS.len() as i64 {
-        return Err(AppError::invalid_input(
-            "unsupported_document_version",
-            "This document requires a newer version of Fablecraft.",
-        ));
+    if version > CURRENT_DOCUMENT_SCHEMA_VERSION {
+        return Err(AppError::InvalidInput {
+            code: "unsupported_document_version",
+            message: format!(
+                "This document uses a newer Fablecraft file format ({version}). Update Fablecraft to open it."
+            ),
+            details: Some(format!(
+                "Document schema {version}. This build supports up to {CURRENT_DOCUMENT_SCHEMA_VERSION}."
+            )),
+        });
     }
     Ok(version)
 }
 
 fn run_migrations(connection: &mut Connection) -> AppResult<()> {
-    if check_version(connection)? == migrations::MIGRATIONS.len() as i64 {
+    if check_version(connection)? == CURRENT_DOCUMENT_SCHEMA_VERSION {
         return Ok(());
     }
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -420,6 +439,7 @@ fn build_document_snapshot(connection: &Connection, path: &Path) -> AppResult<Do
 }
 
 fn build_document_clock(connection: &Connection, path: &Path) -> AppResult<DocumentClock> {
+    check_version(connection)?;
     let existing_document_id = document_id(connection)?;
     let updated_at_ms: i64 = connection.query_row(
         "SELECT updated_at_ms
@@ -451,6 +471,7 @@ fn file_modified_at_ms(path: &Path) -> AppResult<u64> {
 }
 
 fn summarize_document(connection: &Connection, path: &Path) -> AppResult<DocumentSummary> {
+    check_version(connection)?;
     let existing_document_id = document_id(connection)?;
     let (created_at_ms, updated_at_ms): (u64, u64) = connection.query_row(
         "SELECT created_at_ms, updated_at_ms
@@ -540,13 +561,6 @@ fn validate_snapshot(snapshot: &EditableDocumentSnapshot, document_id: &str) -> 
 }
 
 fn validate_cards(cards: &[CardRecord], document_id: &str) -> AppResult<()> {
-    if cards.is_empty() {
-        return Err(AppError::invalid_input(
-            "cards_missing",
-            "A Fablecraft document must contain at least one card.",
-        ));
-    }
-
     let mut seen_ids = HashSet::new();
     let mut root_ids = Vec::new();
 
@@ -584,7 +598,7 @@ fn validate_cards(cards: &[CardRecord], document_id: &str) -> AppResult<()> {
         }
     }
 
-    if root_ids.is_empty() {
+    if !cards.is_empty() && root_ids.is_empty() {
         return Err(AppError::invalid_input(
             "root_card_missing",
             "A Fablecraft document must contain at least one root-depth card.",
@@ -952,10 +966,31 @@ mod tests {
     fn rejects_future_file_versions_before_opening() {
         let path = temp_document_path("future-version");
         DocumentRepository::create(path.clone()).unwrap();
+        let snapshot = DocumentRepository::load(path.clone()).unwrap();
+        let document = snapshot.summary.document_id.clone();
+        let editable = EditableDocumentSnapshot::from(&snapshot);
+        let future_version = super::CURRENT_DOCUMENT_SCHEMA_VERSION + 1;
         let connection = Connection::open(&path).unwrap();
-        connection.pragma_update(None, "user_version", 999).unwrap();
-        assert_eq!(DocumentRepository::open(path.clone()).unwrap_err().code, "unsupported_document_version");
-        assert_eq!(DocumentRepository::load(path.clone()).unwrap_err().code, "unsupported_document_version");
+        connection.pragma_update(None, "user_version", future_version).unwrap();
+        drop(connection);
+        let bytes = fs::read(&path).unwrap();
+
+        let errors = [
+            DocumentRepository::open(path.clone()).unwrap_err(),
+            DocumentRepository::load(path.clone()).unwrap_err(),
+            DocumentRepository::clock(path.clone()).unwrap_err(),
+            DocumentRepository::save(path.clone(), editable).unwrap_err(),
+            DocumentRepository::prepared_history_page(path.clone(), document.clone(), None, None, None)
+                .err().expect("future format must reject History access"),
+            DocumentRepository::restore_revision(path.clone(), document, "test-revision".into(), None)
+                .unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(error.code, "unsupported_document_version");
+            assert!(error.message.contains(&format!("file format ({future_version})")));
+            assert!(error.message.contains("Update Fablecraft"));
+        }
+        assert_eq!(fs::read(&path).unwrap(), bytes);
         fs::remove_file(path).unwrap();
     }
 
@@ -1084,6 +1119,33 @@ mod tests {
         let loaded = DocumentRepository::load(path.clone()).unwrap();
         assert!(!loaded.contents[0].content_json.contains("passageAnchor"));
         assert!(!revision_body(&path, &loaded.revisions[0].id).contains("passageAnchor"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn saves_and_reopens_a_manuscript_with_an_empty_tree() {
+        let path = temp_document_path("empty-tree");
+        DocumentRepository::create(path.clone()).unwrap();
+        let initial = DocumentRepository::load(path.clone()).unwrap();
+        let mut editable = EditableDocumentSnapshot::from(&initial);
+        editable.cards.clear();
+        editable.contents.clear();
+        let manuscript_id = Uuid::new_v4().to_string();
+        editable.manuscript = Some(super::Manuscript {
+            id: manuscript_id.clone(),
+            content_json: EMPTY_EDITOR_DOCUMENT.to_string(),
+            passages: Vec::new(),
+        });
+
+        let saved = DocumentRepository::save(path.clone(), editable).unwrap();
+        let reopened = DocumentRepository::load(path.clone()).unwrap();
+        assert!(reopened.cards.is_empty());
+        assert!(reopened.contents.is_empty());
+        let manuscript = reopened.manuscript.unwrap();
+        assert_eq!(manuscript.id, manuscript_id);
+        assert_eq!(manuscript.content_json, EMPTY_EDITOR_DOCUMENT);
+        assert!(manuscript.passages.is_empty());
+        assert_eq!(reopened.revisions[0].id, saved.revision_id);
         fs::remove_file(path).unwrap();
     }
 

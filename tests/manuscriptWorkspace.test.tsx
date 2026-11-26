@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentWorkspace } from "../src/components/DocumentWorkspace";
 import { CARD_CLIPBOARD_MIME_TYPE, createCardCopyPayload } from "../src/domain/document/clipboard";
+import { contentJsonForPlainText, replaceCardContent } from "../src/domain/document/content";
 import { EMPTY_EDITOR_DOCUMENT_JSON } from "../src/domain/document/editorDocument";
 import { manuscriptUuid } from "../src/domain/document/manuscript";
 import { MANUSCRIPT_CUT_MIME } from "../src/domain/document/manuscriptClipboard";
@@ -17,11 +18,11 @@ import { useInteractionStore } from "../src/state/interactionStore";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 const mocks = vi.hoisted(() => ({
-  load: vi.fn(), confirm: vi.fn(), open: vi.fn(), save: vi.fn(), read: vi.fn(), write: vi.fn(),
+  directory: vi.fn(), load: vi.fn(), confirm: vi.fn(), open: vi.fn(), save: vi.fn(), read: vi.fn(), write: vi.fn(),
 }));
 vi.mock("../src/storage/documentSnapshots", () => ({ loadCurrentDocumentSnapshot: mocks.load }));
 vi.mock("../src/storage/fableDirectory", () => ({
-  listCurrentDocumentDirectory: async () => null,
+  listCurrentDocumentDirectory: mocks.directory,
   listFableDirectory: async () => null,
 }));
 vi.mock("../src/storage/useDocumentAutosave", () => ({ useDocumentAutosave: () => {} }));
@@ -86,6 +87,11 @@ beforeEach(() => {
   useInteractionStore.getState().setActiveCardId(null);
   for (const mock of Object.values(mocks)) mock.mockReset();
   source = makeDocumentSnapshot();
+  mocks.directory.mockResolvedValue({
+    currentDocumentPath: source.summary.path,
+    entries: [{ kind: "document", name: source.summary.name, path: source.summary.path }],
+    folderName: "Fables", folderPath: "/tmp/Fables", parentFolderPath: null,
+  });
   resize(splitMinimumWidth + 220);
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -98,6 +104,153 @@ afterEach(async () => {
 });
 
 describe("Manuscript workspace", () => {
+  it("zooms the active pane independently while preserving manuscript focus and selection", async () => {
+    source.manuscript = prose("The first line stays selected.");
+    await mount();
+    await action("layout-both");
+    await action("pane-left");
+    const stage = tree().querySelector<HTMLElement>('[data-testid="document-stage"]')!;
+    const manuscriptWidth = () => pane().closest<HTMLElement>(".fc-workspace")!
+      .style.getPropertyValue("--fc-manuscript-prose-width");
+
+    await act(async () => { key(stage, "-", { metaKey: true }); });
+    expect(stage.dataset.viewMode).toBe("compact");
+    expect(manuscriptWidth()).toBe("720px");
+
+    await action("pane-right");
+    const proseEditor = editor();
+    await act(async () => { proseEditor.commands.setTextSelection({ from: 2, to: 8 }); });
+    await act(async () => { key(editorElement(), "=", { ctrlKey: true }); });
+    expect(stage.dataset.viewMode).toBe("compact");
+    expect(manuscriptWidth()).toBe("900px");
+    expect(editor()).toBe(proseEditor);
+    expect(document.activeElement).toBe(editorElement());
+    expect(proseEditor.state.selection).toMatchObject({ from: 2, to: 8 });
+
+    await action("zoom-out");
+    expect(manuscriptWidth()).toBe("720px");
+    await action("zoom-out");
+    expect(manuscriptWidth()).toBe("612px");
+    await action("zoom-out");
+    expect(manuscriptWidth()).toBe("612px");
+
+    await action("pane-left");
+    await action("zoom-out");
+    expect(stage.dataset.viewMode).toBe("wide-lens");
+    expect(manuscriptWidth()).toBe("612px");
+  });
+
+  it("returns to the selected file from the first manuscript caret with plain Left", async () => {
+    source.manuscript = prose("> First line.\n\nSecond line.");
+    await mount();
+    await action("layout-manuscript");
+    await act(async () => {
+      editor().commands.setTextSelection(4);
+      key(editorElement(), "ArrowLeft");
+    });
+    expect(pane().hidden).toBe(false);
+
+    await act(async () => {
+      editor().commands.setTextSelection({ from: 2, to: 4 });
+      key(editorElement(), "ArrowLeft");
+    });
+    expect(pane().hidden).toBe(false);
+
+    await act(async () => {
+      editor().commands.setTextSelection(2);
+      key(editorElement(), "ArrowLeft", { shiftKey: true });
+      key(editorElement(), "ArrowLeft", { isComposing: true });
+    });
+    expect(pane().hidden).toBe(false);
+
+    await act(async () => { key(editorElement(), "ArrowLeft"); });
+    expect(pane().hidden).toBe(true);
+    const selectedFile = container.querySelector('[data-explorer-kind="document"][data-is-active="true"]');
+    expect(selectedFile?.textContent).toContain(source.summary.name.replace(/\.fable$/, ""));
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("document-stage");
+
+    await act(async () => { key(document.activeElement!, "ArrowRight"); });
+    expect(pane().hidden).toBe(false);
+    expect(document.activeElement).toBe(editorElement());
+    expect(editor().state.selection.from).toBe(2);
+  });
+
+  it("leaves Tree editing with Escape and returns to the same branch", async () => {
+    source = replaceCardContent(source, {
+      cardId: "card-a",
+      contentJson: contentJsonForPlainText("Branch text"),
+    });
+    await mount();
+    await act(async () => useInteractionStore.getState().setActiveCardId("card-a"));
+    await act(async () => { key(document.activeElement!, "Enter"); });
+    const treeEditor = tree().querySelector<HTMLElement>(".ProseMirror[contenteditable=true]")!;
+    expect(treeEditor).toBeTruthy();
+
+    await act(async () => { key(treeEditor, "Escape"); });
+    expect(container.querySelector('[data-explorer-kind="document"][data-is-active="true"]')).toBeTruthy();
+    expect(useAppStore.getState().mode).toBe("navigation");
+
+    await act(async () => { key(document.activeElement!, "ArrowRight"); });
+    expect(container.querySelector('[data-testid="document-title"]')).toBeTruthy();
+    expect(useInteractionStore.getState().activeCardId).toBe("card-a");
+  });
+
+  it("opens an empty tree on an editable first card and saves it on the first edit", async () => {
+    source = { ...source, cards: [], contents: [] };
+    await mount();
+    await action("layout-manuscript");
+    await act(async () => { key(editorElement(), "Escape"); });
+    await act(async () => { key(document.activeElement!, "ArrowRight"); });
+    await action("layout-tree");
+
+    const draft = tree().querySelector<HTMLElement & { editor: Editor }>(".ProseMirror[contenteditable=true]")!;
+    expect(document.activeElement).toBe(draft);
+    expect(draft.querySelector("[data-placeholder]")?.getAttribute("data-placeholder")).toBe("Your story starts here");
+    expect(useDocumentStore.getState().snapshot?.cards).toEqual([]);
+    expect(useDocumentStore.getState().dirty).toBe(false);
+
+    await act(async () => { draft.editor.commands.insertContent("First note"); });
+    const saved = useDocumentStore.getState().snapshot;
+    expect(saved?.cards).toHaveLength(1);
+    expect(saved?.cards[0]?.parentId).toBeNull();
+    expect(saved?.contents[0]?.contentJson).toContain("First note");
+    expect(tree().querySelector(".ProseMirror")).toBe(draft);
+
+    await action("undo");
+    expect(useDocumentStore.getState().snapshot?.cards).toEqual([]);
+    await action("redo");
+    expect(useDocumentStore.getState().snapshot?.contents[0]?.contentJson).toContain("First note");
+  });
+
+  it("leaves a blank split manuscript with Escape and remembers its focus when reopened", async () => {
+    source = { ...source, cards: [], contents: [] };
+    await mount();
+    await action("layout-both");
+    await act(async () => { editorElement().focus(); });
+    expect(current()).toBeNull();
+
+    await act(async () => { key(editorElement(), "Escape"); });
+    expect(pane().hidden).toBe(true);
+    expect(split()).toBeNull();
+    await act(async () => { key(document.activeElement!, "ArrowRight"); });
+    expect(split()).not.toBeNull();
+    expect(document.activeElement).toBe(editorElement());
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    resize(408);
+    await mount();
+    expect(pane().hidden).toBe(false);
+    expect(tree().style.display).toBe("none");
+    expect(document.activeElement).toBe(editorElement());
+    expect(current()).toBeNull();
+
+    await act(async () => { key(editorElement(), "ArrowLeft"); });
+    expect(pane().hidden).toBe(true);
+    await act(async () => { key(document.activeElement!, "ArrowRight"); });
+    expect(document.activeElement).toBe(editorElement());
+  });
+
   it("visits each layout without creating prose, routes chords and preserves editor selection on resize", async () => {
     await mount();
     expect(pane().hidden).toBe(true);
@@ -452,12 +605,12 @@ describe("Manuscript workspace", () => {
     expect(editor().state.selection.empty).toBe(true);
     expect(pane().querySelector(".fc-manuscript-search-highlight")).toBeNull();
     expect(pane().textContent).not.toContain("Linked passages");
-    await act(async () => { chord("Left"); });
-    expect(useInteractionStore.getState().workspacePane).toBe("tree");
-    mocks.confirm.mockResolvedValue(true);
-    await action("remove-manuscript");
-    expect(current()).toBeNull();
-    expect(pane().hidden).toBe(true);
+    const manuscriptId = current()?.id;
+    await act(async () => editor().commands.clearContent());
+    expect(current()?.id).toBe(manuscriptId);
+    expect(current()?.passages).toEqual([]);
+    expect(editor().isEmpty).toBe(true);
+    expect(pane().hidden).toBe(false);
     await action("undo");
     expect(current()?.passages[0]?.id).toBe(first.id);
     expect(current()?.passages[0]?.targetCardIds).toEqual(["card-b"]);

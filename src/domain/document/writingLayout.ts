@@ -3,7 +3,7 @@ import type { StageLayoutResult } from "./spatial";
 
 export interface WritingViewportTokens {
   minimumCardWidth: number;
-  focusedCardWidth: number;
+  maximumCardWidth?: number;
   maximumColumns: number;
   margin: number;
   spacing: number;
@@ -13,17 +13,17 @@ export interface WritingViewportTokens {
 export function writingViewport(
   width: number,
   tokens: WritingViewportTokens,
-  { focused = false, showParentInTwoColumns = false } = {},
+  { showParentInTwoColumns = false } = {},
 ) {
-  const available = Math.min(focused ? tokens.focusedCardWidth : Infinity, Math.max(1, width - tokens.margin * 2));
-  const columns = Math.max(1, Math.min(focused ? 1 : tokens.maximumColumns,
+  const available = Math.max(1, width - tokens.margin * 2);
+  const columns = Math.max(1, Math.min(tokens.maximumColumns,
     Math.floor((available + tokens.spacing) / (tokens.minimumCardWidth + tokens.spacing))));
-  const cardWidth = Math.max(1, (available - (columns - 1) * tokens.spacing) / columns);
+  const cardWidth = Math.min(tokens.maximumCardWidth ?? Infinity, (available - (columns - 1) * tokens.spacing) / columns);
   const activeColumn = columns >= 3 || (columns === 2 && showParentInTwoColumns) ? 1 : 0;
   return {
     columns,
     cardWidth,
-    activeX: focused ? 0 : tokens.margin + cardWidth / 2 + activeColumn * (cardWidth + tokens.spacing) - width / 2,
+    activeX: (activeColumn - (columns - 1) / 2) * (cardWidth + tokens.spacing),
     minimumDepth: activeColumn ? -activeColumn : 0,
     maximumDepth: columns - activeColumn - 1,
   };

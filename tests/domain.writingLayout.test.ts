@@ -1,6 +1,6 @@
 import { arrangeWritingStage, writingViewport } from "../src/domain/document/writingLayout";
 import { stageLayout } from "../src/domain/document/spatial";
-import { writingLayoutTokens as tokens } from "../src/styles/tokens";
+import { writingLayoutTokens as tokens, writingZoomTokens } from "../src/styles/tokens";
 import { makeDocumentSnapshot } from "./documentSnapshotFactory";
 
 describe("responsive writing layout", () => {
@@ -29,9 +29,15 @@ describe("responsive writing layout", () => {
   });
 
   it.each([[408, 360], [800, 752], [1440, 880], [2560, 880]])(
-    "centers a document-width focused card in a %i pixel viewport", (width, cardWidth) => {
-      expect(writingViewport(width, tokens, { focused: true, showParentInTwoColumns: true })).toMatchObject({ columns: 1, cardWidth,
+    "centers a single Large card column in a %i pixel viewport", (width, cardWidth) => {
+      expect(writingViewport(width, { ...tokens, ...writingZoomTokens.large }, { showParentInTwoColumns: true })).toMatchObject({ columns: 1, cardWidth,
         activeX: 0, minimumDepth: 0, maximumDepth: 0 });
+    },
+  );
+
+  it.each([[615, 1], [616, 2], [911, 2], [912, 3], [1207, 3], [1208, 4]])(
+    "fits %i workspace pixels into %i Compact columns", (width, columns) => {
+      expect(writingViewport(width, { ...tokens, ...writingZoomTokens.compact }).columns).toBe(columns);
     },
   );
 

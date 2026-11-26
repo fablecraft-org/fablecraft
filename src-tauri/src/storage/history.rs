@@ -414,9 +414,9 @@ fn open_history(path: &Path) -> AppResult<Connection> {
 
 fn open_timeline_reader(path: &Path) -> AppResult<Connection> {
     validate_fable_path(path)?;
-    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    connection.busy_timeout(std::time::Duration::from_secs(5))?;
-    if super::check_version(&connection)? == super::migrations::MIGRATIONS.len() as i64 {
+    let (connection, version) =
+        super::open_version_checked_connection(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    if version == super::CURRENT_DOCUMENT_SCHEMA_VERSION {
         return Ok(connection);
     }
     drop(connection);
@@ -424,6 +424,7 @@ fn open_timeline_reader(path: &Path) -> AppResult<Connection> {
 }
 
 fn check_document(connection: &Connection, expected: &str) -> AppResult<()> {
+    super::check_version(connection)?;
     if document_id(connection)? != expected {
         return Err(AppError::conflict(
             "document_mismatch",

@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::app_state::AppState;
 use crate::error::{AppError, AppErrorPayload, AppResult};
 use crate::session::read_open_document_sessions;
+use crate::storage::manuscript::{self, PlainText};
 use crate::storage::{
     CardContentRecord, DocumentRepository, DocumentSnapshot, EditableDocumentSnapshot,
 };
@@ -62,11 +63,22 @@ pub struct McpToolResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ReadManuscriptArgs {
+    revision_id: Option<String>,
+    start_char: Option<usize>,
+    end_char: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct EditManuscriptArgs {
     base_revision_id: String,
-    from: usize,
-    to: usize,
-    insert: Vec<Value>,
+    from: Option<usize>,
+    to: Option<usize>,
+    insert: Option<Vec<Value>>,
+    start_char: Option<usize>,
+    end_char: Option<usize>,
+    replacement_text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,22 +126,22 @@ pub fn list_mcp_tools() -> Vec<McpToolDefinition> {
             scope: "document".to_string(),
         },
         McpToolDefinition {
-            description: "Read summary metadata for a .fable document.".to_string(),
+            description: "Read summary metadata, the saved revision and manuscript word and character counts.".to_string(),
             input_example: "{\n  \"documentPath\": \"/path/to/story.fable\"\n}".to_string(),
             is_mutation: false,
             name: TOOL_GET_DOCUMENT.to_string(),
             scope: "document".to_string(),
         },
         McpToolDefinition {
-            description: "Read manuscript rich text, passages and the revision ID for edits.".to_string(),
-            input_example: r#"{"documentPath":"/path/to/story.fable"}"#.to_string(),
+            description: "Read a manuscript character range with its revision and passage links. Omit the range for the full rich-text manuscript.".to_string(),
+            input_example: r#"{"documentPath":"/path/to/story.fable","revisionId":"revision-id","startChar":0,"endChar":100}"#.to_string(),
             is_mutation: false,
             name: TOOL_GET_MANUSCRIPT.to_string(),
             scope: "document".to_string(),
         },
         McpToolDefinition {
-            description: "Replace a UTF-16 ProseMirror range within a textblock or at sibling block boundaries. Supply the base revision and closed rich JSON nodes to insert.".to_string(),
-            input_example: r#"{"documentPath":"/path/to/story.fable","baseRevisionId":"revision-id","from":1,"to":1,"insert":[{"type":"text","text":"New prose"}]}"#.to_string(),
+            description: "Replace a UTF-16 character range within one manuscript text block using replacementText. Alternatively supply a ProseMirror range and rich nodes. Both forms require the base revision.".to_string(),
+            input_example: r#"{"documentPath":"/path/to/story.fable","baseRevisionId":"revision-id","startChar":0,"endChar":0,"replacementText":"New prose"}"#.to_string(),
             is_mutation: true,
             name: TOOL_EDIT_MANUSCRIPT.to_string(),
             scope: "document".to_string(),
@@ -342,20 +354,32 @@ fn read_document(
         .cards
         .iter()
         .find(|card| card.parent_id.is_none())
-        .map(|card| card.id.clone())
-        .ok_or_else(|| {
-            AppError::storage(
-                "missing_root_card",
-                "The open document is missing its root card.",
-                None,
-            )
-        })?;
+        .map(|card| &card.id);
+    if root_card_id.is_none() && !snapshot.cards.is_empty() {
+        return Err(AppError::storage(
+            "missing_root_card",
+            "The open document is missing its root card.",
+            None,
+        ));
+    }
+    let manuscript = snapshot
+        .manuscript
+        .as_ref()
+        .map(|prose| {
+            let plain = PlainText::from_manuscript(prose)?;
+            Ok::<_, AppError>(json!({
+                "wordCount": plain.text.split_whitespace().count(),
+                "characterCount": plain.character_count,
+            }))
+        })
+        .transpose()?;
     let payload = json!({
         "summary": snapshot.summary,
         "rootCardId": root_card_id,
         "cardCount": snapshot.cards.len(),
         "treeDepthCounts": tree_depth_counts(&snapshot),
         "hasManuscript": snapshot.manuscript.is_some(),
+        "manuscript": manuscript,
         "revisionId": snapshot.revisions.first().map(|revision| &revision.id),
     });
 
@@ -369,17 +393,91 @@ fn read_document(
 }
 
 fn read_manuscript(snapshot: DocumentSnapshot, request: McpToolRequest) -> AppResult<McpToolResponse> {
-    let payload = json!({
-        "revisionId": snapshot.revisions.first().map(|revision| &revision.id),
-        "manuscript": snapshot.manuscript,
-    });
-    Ok(McpToolResponse {
-        result_json: serialize_result(&payload)?,
+    let args: ReadManuscriptArgs = parse_arguments(request.arguments_json)?;
+    let revision_id = snapshot
+        .revisions
+        .first()
+        .map(|revision| revision.id.as_str());
+    if args
+        .revision_id
+        .as_deref()
+        .is_some_and(|expected| Some(expected) != revision_id)
+    {
+        return Err(AppError::conflict(
+            "stale_document_revision",
+            "The manuscript changed. Read the current revision before requesting another range.",
+        ));
+    }
+    let mut response = McpToolResponse {
+        result_json: String::new(),
         scope: request.scope,
         snapshot: None,
         summary: "Loaded manuscript.".to_string(),
         tool_name: request.tool_name,
-    })
+    };
+    match (args.start_char, args.end_char) {
+        (None, None) => {
+            response.result_json = serialize_result(&json!({
+                "revisionId": revision_id,
+                "manuscript": snapshot.manuscript,
+            }))?;
+        }
+        (Some(start), Some(end)) if start <= end => {
+            let prose = snapshot.manuscript.as_ref().ok_or_else(|| {
+                AppError::not_found("manuscript_missing", "This document has no manuscript.")
+            })?;
+            let plain = PlainText::from_manuscript(prose)?;
+            let start_byte = plain.byte_index(start)?;
+            let end_byte = plain.byte_index(end)?;
+            let requested = &plain.text[start_byte..end_byte];
+            let first_char_bytes = requested.chars().next().map_or(0, char::len_utf8);
+            let mut page_bytes = requested.len().min(MAX_MCP_PAYLOAD_BYTES / 4);
+            loop {
+                while !requested.is_char_boundary(page_bytes) {
+                    page_bytes -= 1;
+                }
+                let text = &requested[..page_bytes];
+                let page_end = start + text.encode_utf16().count();
+                let blocks = plain.block_ranges(start, page_end);
+                let passages: Vec<_> = prose
+                    .passages
+                    .iter()
+                    .filter(|passage| {
+                        let first = blocks.partition_point(|block| block.to <= passage.from);
+                        blocks
+                            .get(first)
+                            .is_some_and(|block| block.from < passage.to)
+                    })
+                    .collect();
+                response.result_json = serialize_result(&json!({
+                    "revisionId": revision_id,
+                    "manuscriptId": prose.id,
+                    "startChar": start,
+                    "endChar": page_end,
+                    "text": text,
+                    "blocks": blocks,
+                    "passages": passages,
+                    "nextStartChar": (page_end < end).then_some(page_end),
+                }))?;
+                match enforce_payload_limit(&response) {
+                    Ok(()) => break,
+                    Err(error) if page_bytes <= first_char_bytes => {
+                        return Err(error);
+                    }
+                    Err(_) => {
+                        page_bytes = (page_bytes / 2).max(first_char_bytes);
+                    }
+                }
+            }
+        }
+        _ => {
+            return Err(AppError::invalid_input(
+                "mcp_invalid_arguments",
+                "Supply both startChar and endChar as an ordered range.",
+            ))
+        }
+    }
+    Ok(response)
 }
 
 fn edit_manuscript(
@@ -398,7 +496,27 @@ fn edit_manuscript(
     let prose = editable.manuscript.as_mut().ok_or_else(|| {
         AppError::not_found("manuscript_missing", "This document has no manuscript.")
     })?;
-    crate::storage::manuscript::edit(prose, args.from, args.to, &args.insert)?;
+    match (
+        args.from,
+        args.to,
+        args.insert,
+        args.start_char,
+        args.end_char,
+        args.replacement_text,
+    ) {
+        (Some(from), Some(to), Some(insert), None, None, None) => {
+            manuscript::edit(prose, from, to, &insert)?;
+        }
+        (None, None, None, Some(start), Some(end), Some(replacement)) => {
+            manuscript::edit_plain_text(prose, start, end, &replacement)?;
+        }
+        _ => {
+            return Err(AppError::invalid_input(
+                "mcp_invalid_arguments",
+                "Supply startChar, endChar and replacementText, or from, to and insert.",
+            ))
+        }
+    }
     let result = repository_result(DocumentRepository::save(path, editable))?;
     Ok(McpToolResponse {
         result_json: serialize_result(&json!({ "revisionId": result.revision_id }))?,
@@ -1102,19 +1220,6 @@ fn delete_card_subtree_snapshot(
     snapshot: &DocumentSnapshot,
     card_id: &str,
 ) -> AppResult<DocumentSnapshot> {
-    let root_cards = snapshot
-        .cards
-        .iter()
-        .filter(|card| card.parent_id.is_none())
-        .collect::<Vec<_>>();
-
-    if root_cards.len() == 1 && root_cards[0].id == card_id {
-        return Err(AppError::invalid_input(
-            "last_root_card",
-            "The last root card cannot be deleted.",
-        ));
-    }
-
     let removed_card = snapshot
         .cards
         .iter()

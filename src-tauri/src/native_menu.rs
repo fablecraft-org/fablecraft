@@ -36,7 +36,8 @@ const TOOLS_ENABLE_CLAUDE_DESKTOP: &str = "tools.enable_claude_desktop";
 const WINDOW_RELOAD: &str = "window.reload";
 const WINDOW_WIDE_LENS: &str = "window.wide_lens";
 const WINDOW_NORMAL: &str = "window.normal";
-const WINDOW_FOCUSED: &str = "window.focused";
+const WINDOW_COMPACT: &str = "window.compact";
+const WINDOW_LARGE: &str = "window.large";
 const WINDOW_ZOOM_IN: &str = "window.zoom_in";
 const WINDOW_ZOOM_OUT: &str = "window.zoom_out";
 const HELP_SHORTCUTS: &str = "help.shortcuts";
@@ -55,7 +56,6 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     let export_manuscript_markdown = MenuItemBuilder::with_id("export-manuscript-markdown", "Export Manuscript Markdown").build(app)?;
     let write_manuscript = MenuItemBuilder::with_id("write-manuscript", "Write Manuscript").build(app)?;
     let link_manuscript_passage = MenuItemBuilder::with_id("link-manuscript-passage", "Link Manuscript Passage").build(app)?;
-    let remove_manuscript = MenuItemBuilder::with_id("remove-manuscript", "Remove Manuscript").build(app)?;
     let layout_tree = MenuItemBuilder::with_id("layout-tree", "Show Tree").build(app)?;
     let layout_both = MenuItemBuilder::with_id("layout-both", "Show Both").build(app)?;
     let show_history = MenuItemBuilder::with_id("show-history", "Toggle History")
@@ -145,7 +145,8 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
 
     let wide_lens = MenuItemBuilder::with_id(WINDOW_WIDE_LENS, "Wide Lens").build(app)?;
     let normal = MenuItemBuilder::with_id(WINDOW_NORMAL, "Normal").build(app)?;
-    let focused = MenuItemBuilder::with_id(WINDOW_FOCUSED, "Focused").build(app)?;
+    let compact = MenuItemBuilder::with_id(WINDOW_COMPACT, "Compact").build(app)?;
+    let large = MenuItemBuilder::with_id(WINDOW_LARGE, "Large").build(app)?;
 
     let shortcuts = MenuItemBuilder::with_id(HELP_SHORTCUTS, "Shortcuts").build(app)?;
     let commands = MenuItemBuilder::with_id(HELP_COMMANDS, "Commands").build(app)?;
@@ -210,7 +211,6 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
     let manuscript_menu = SubmenuBuilder::new(app, "Manuscript")
         .item(&write_manuscript)
         .item(&link_manuscript_passage)
-        .item(&remove_manuscript)
         .build()?;
 
     let tools_menu = SubmenuBuilder::new(app, "Tools")
@@ -229,8 +229,9 @@ pub fn build_native_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R
         .item(&zoom_out)
         .separator()
         .item(&wide_lens)
+        .item(&compact)
         .item(&normal)
-        .item(&focused)
+        .item(&large)
         .separator()
         .item(&layout_tree)
         .item(&layout_both)
@@ -269,7 +270,6 @@ pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent
         "export-manuscript-markdown" => emit_action(app, "export-manuscript-markdown"),
         "write-manuscript" => emit_action(app, "write-manuscript"),
         "link-manuscript-passage" => emit_action(app, "link-manuscript-passage"),
-        "remove-manuscript" => emit_action(app, "remove-manuscript"),
         "layout-tree" => emit_action(app, "layout-tree"),
         "layout-both" => emit_action(app, "layout-both"),
         "show-history" => emit_action(app, "show-history"),
@@ -303,7 +303,8 @@ pub fn handle_native_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent
         TOOLS_ENABLE_CLAUDE_DESKTOP => emit_action(app, "enable-claude-desktop"),
         WINDOW_WIDE_LENS => emit_action(app, "view-wide-lens"),
         WINDOW_NORMAL => emit_action(app, "view-normal"),
-        WINDOW_FOCUSED => emit_action(app, "view-focused"),
+        WINDOW_COMPACT => emit_action(app, "view-compact"),
+        WINDOW_LARGE => emit_action(app, "view-large"),
         WINDOW_ZOOM_IN => emit_action(app, "zoom-in"),
         WINDOW_ZOOM_OUT => emit_action(app, "zoom-out"),
         HELP_GETTING_STARTED => emit_action(app, "help-getting-started"),
@@ -350,12 +351,13 @@ pub fn update_workspace_menu(app: AppHandle, state: WorkspaceMenuState) -> Resul
                 "layout-tree" | "layout-manuscript" | "pane-left" | "pane-right" |
                 "import-manuscript-markdown" | TOOLS_SEARCH => document,
                 "write-manuscript" => document && !state.manuscript,
-                "remove-manuscript" | "export-manuscript-markdown" => manuscript,
+                "export-manuscript-markdown" => manuscript,
                 "link-manuscript-passage" => manuscript && !tree && state.link,
                 FILE_EXPORT_MARKDOWN | CARD_MERGE_ABOVE | CARD_MERGE_BELOW | CARD_SHIFT_UP |
                 CARD_SHIFT_DOWN | CARD_SPLIT | CARD_CREATE_CHILD | CARD_CREATE_ANCHORED_CHILD |
                 CARD_CREATE_PARENT | CARD_CREATE_ABOVE | CARD_CREATE_BELOW | WINDOW_NORMAL |
-                WINDOW_WIDE_LENS | WINDOW_FOCUSED | WINDOW_ZOOM_IN | WINDOW_ZOOM_OUT => tree,
+                WINDOW_WIDE_LENS | WINDOW_COMPACT | WINDOW_LARGE => tree,
+                WINDOW_ZOOM_IN | WINDOW_ZOOM_OUT => document,
                 EDIT_UNDO | EDIT_REDO => document,
                 _ => continue,
             };

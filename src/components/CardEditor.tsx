@@ -1,7 +1,7 @@
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import StarterKit from "@tiptap/starter-kit";
-import { TextSelection } from "@tiptap/pm/state";
+import { Selection, TextSelection } from "@tiptap/pm/state";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { useEffect, useRef } from "react";
 import { trimTrailingEmptyParagraphs } from "../domain/document/content";
@@ -25,7 +25,6 @@ interface CardEditorProps {
   cardLabels?: Record<string, string>;
   documentId?: string;
   onOpenCardLink?: (cardId: string) => void;
-  canLeaveEditing?: boolean;
   canCreateStructure: boolean;
   contentJson: string;
   focusPlacement?: "start" | "end" | null;
@@ -50,6 +49,7 @@ interface CardEditorProps {
   onNavigateParent: (placement?: "start" | "end") => boolean;
   pendingTextInput?: string | null;
   onRequestNavigation: () => void;
+  onNavigateDirectory?: () => boolean;
   onSplitAtSelection: (selectionStart: number, selectionEnd: number, richSplit?: SplitCardContent) => void;
   onUndo: () => void;
   onUpdateContent: (contentJson: string) => void;
@@ -173,7 +173,6 @@ export function CardEditor({
   onRevealSelection,
   selectionViewportKey,
   cardLabels, documentId, onOpenCardLink,
-  canLeaveEditing = true,
   canCreateStructure,
   contentJson,
   focusPlacement = null,
@@ -198,6 +197,7 @@ export function CardEditor({
   onNavigateParent,
   pendingTextInput = null,
   onRequestNavigation,
+  onNavigateDirectory,
   onSplitAtSelection,
   onUndo,
   onUpdateContent,
@@ -303,7 +303,7 @@ export function CardEditor({
         return new Slice(strip(slice.content), slice.openStart, slice.openEnd);
       },
       handleKeyDown(_, event): boolean {
-        if (readOnly) return false;
+        if (readOnly || event.defaultPrevented || event.isComposing || event.keyCode === 229) return false;
         const currentEditor = editorRef.current;
 
         if (currentEditor && event.key === " " && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey &&
@@ -312,16 +312,11 @@ export function CardEditor({
           return true;
         }
 
-        if (!currentEditor) {
+        if (!currentEditor || currentEditor.view.composing) {
           return false;
         }
 
         if (event.key === "Escape") {
-          if (!canLeaveEditing) {
-            event.preventDefault();
-            return true;
-          }
-
           event.preventDefault();
           onRequestNavigation();
           return true;
@@ -396,6 +391,14 @@ export function CardEditor({
           if (canCreateStructure) {
             onCreateParentLevel();
           }
+          return true;
+        }
+
+        if (event.key === "ArrowLeft" && !event.shiftKey && !event.altKey &&
+          currentEditor.state.selection instanceof TextSelection &&
+          currentEditor.state.selection.eq(Selection.atStart(currentEditor.state.doc)) &&
+          onNavigateDirectory?.()) {
+          event.preventDefault();
           return true;
         }
 

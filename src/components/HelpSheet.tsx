@@ -36,12 +36,12 @@ const shortcutRows = [
   ["#B02 in Manuscript", "Link the whole paragraph to the existing card"],
   ["Control + L", "Switch to Tree for selected manuscript text, then press Enter on a card to link it"],
   ["Cmd/Ctrl + K", "Toggle the command palette"],
-  ["Cmd/Ctrl + − / +", "Step between Wide Lens, Normal, and Focused views"],
+  ["Cmd/Ctrl + − / +", "Zoom the active pane. Tree also has Wide Lens."],
 ];
 
 const commandGroups = [
-  { commands: ["Show Tree", "Show Both", "Show Manuscript", "Focus Pane Left / Right", "Wide Lens", "Normal", "Focused"], label: "View" },
-  { commands: ["Write Manuscript", "Remove Manuscript", "Link Manuscript Passage",
+  { commands: ["Show Tree", "Show Both", "Show Manuscript", "Focus Pane Left / Right", "Wide Lens", "Compact", "Normal", "Large"], label: "View" },
+  { commands: ["Write Manuscript", "Link Manuscript Passage",
     "Import Manuscript Markdown", "Export Manuscript Markdown"], label: "Manuscript" },
   {
     commands: ["New Document", "New Document From Tree", "Open Document", "Show History", "Import Markdown", "Export Level (MD / HTML)"],

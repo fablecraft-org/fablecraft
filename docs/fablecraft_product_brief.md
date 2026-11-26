@@ -73,7 +73,7 @@ Cards do NOT have titles.
   - `order_index`
 - Children are derived, not stored
 - Paths (e.g. `0.2.1`) are computed
-- The document may contain multiple cards at root depth; root cards are ordered siblings with `parent_id = null`.
+- The tree can be empty. Root cards are ordered siblings with `parent_id = null`. An empty Tree opens on an editable first card with the placeholder `Your story starts here`. The first edit saves that card.
 
 ### 2.3 Folder Context
 
@@ -87,8 +87,8 @@ Cards do NOT have titles.
 - In directory navigation, Tab and Shift+Tab do not move browser focus between explorer cards or show a separate blue focus highlight; arrow keys control the selected file or folder. Rename fields and dialogs keep their normal keyboard focus behavior.
 - FABLE explorer card names hide the `.fable` file extension.
 - Folder and FABLE explorer cards follow the same spatial navigation model as writing cards: the selected explorer card is centered, its same-level siblings remain visible in the same vertical column, its parent sits one column to the left, and its remembered child (otherwise its first visible child) sits one column to the right on the same vertical center line.
-- Moving left from a root card selects the current `.fable` document card; moving left again selects the containing folder.
-- Moving left out of the root-card column reveals the selected FABLE file, its sibling files/folders, and its containing folder. Returning right into the document hides all explorer cards and restores the centered title; moving left back out restores the explorer location, including a nested folder preview. The fixed title and all writing cards are hidden while browsing files and folders, including when the open FABLE file is selected. File browsing and document content are separate views; Right from the open file enters its writing tree.
+- Left from a root card or an empty tree selects the current `.fable` document card. While editing a root card or the manuscript, Left at the first caret position also selects the current file. Escape from either editor selects the current file from anywhere in the text. A search or dialog handles its own Escape first. Left again selects the containing folder.
+- Returning to the directory reveals the selected FABLE file, its sibling files/folders, and its containing folder. Returning right into the document hides all explorer cards and restores the centered title; moving left back out restores the explorer location, including a nested folder preview. The fixed title and all writing cards are hidden while browsing files and folders, including when the open FABLE file is selected. Right from the open file restores the document’s last Tree, Both, or Manuscript layout and the active pane. The layout and pane are also remembered when the document is reopened.
 - When a folder is selected, its parent folder remains visible to the left when one exists, and the right column immediately shows only child folders and `.fable` files in the selected folder.
 - Moving left from a FABLE file to its containing folder also shows that folder's public sibling folders and `.fable` files in the selected column. Up/Down and clicks select those same-level neighbours; Right selects the remembered child of the active folder, falling back to its first visible child.
 - When a child folder row is selected inside a folder listing, that child folder's own child folders and `.fable` files appear immediately in the next column to the right.
@@ -99,7 +99,7 @@ Cards do NOT have titles.
 - FABLE document renames append `.fable` automatically, reject empty names and path separators, and do not overwrite an existing `.fable` file.
 - Selecting a child folder and moving right or pressing Enter browses into that folder.
 - Folder preview children are real navigation targets: Right from a selected child folder moves to its remembered child folder or FABLE file (otherwise its first visible child) before entering/opening that child.
-- When a FABLE file is selected and it is the open document, Right moves into the document's remembered root card (otherwise its first root card).
+- When returning to Tree, Right restores the selected card if the writer left from within that branch. At root depth it restores the remembered root, with the first root as fallback.
 - Tab+Right, Tab+Up, or Tab+Down in directory mode creates a new untitled `.fable` file and selects its explorer card with the name ready to edit. From a folder card it creates inside that folder; from a file or child-folder entry it creates beside that entry in its containing folder, including nested previews.
 - Creating a directory file keeps the existing document open in the background and stays in directory navigation. Enter confirms the new name; Escape or confirming an empty name keeps the generated `Untitled` name (or the next available numbered name). Right from the selected file opens it through the normal document-opening flow; creation alone does not enter the document.
 - Pressing Delete or Backspace on a selected FABLE document card opens a confirmation dialog asking `Move "[file name]" and all its contents to Trash?` before moving the entire `.fable` file to the system Trash. It can be restored using the operating system until Trash is emptied; a Trash failure leaves the document open and never falls back to permanent deletion.
@@ -161,8 +161,8 @@ Cards do NOT have titles.
 - New cards start as a single empty paragraph using normal body text. Heading formatting is opt-in through Markdown markers such as `# `, `## `, or `### ` at the start of a line.
 - Empty cards cannot create additional cards
 - If abandoned empty → removed
-- The only card that must never be removed is the final remaining card in the whole tree; deletion of that card clears its content instead.
-- Backspace on an empty card deletes it when at least one other card exists
+- Deleting the final root and its subtree in Tree or through MCP leaves an empty tree. The manuscript remains available.
+- Backspace deletes an empty leaf, including the final card.
 - Deleting a card returns selection to the most recently visited card that survives the deletion. Creating a card and deleting it therefore returns to the card the user was on before creation. Visit history lasts only for the current document session; without a surviving visited card, normal spatial deletion fallback applies. Explicit arrow navigation still follows its requested destination when abandoning an empty card.
 - Cards always render fully (no collapsing)
 
@@ -232,7 +232,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 
 - In navigation mode on a writing card, Cmd/Ctrl+C copies the active card's content and fixed source identity. Navigation paste copies content; editor paste inserts a card link (§2.6).
 - In navigation mode on a writing card, Cmd/Ctrl+X cuts the active card plus its full descendant subtree and removes that subtree immediately.
-- Cutting the final remaining root card keeps the document valid by clearing that root card and removing its children.
+- Cutting the final remaining root card clears that root card and removes its children.
 - In navigation mode, Cmd/Ctrl+V pastes only valid Fablecraft card payloads.
 - Pasting a valid Fablecraft card payload onto an empty leaf writing card fills that card in place, including while editing a newly created card. A subtree payload fills the active card with its root and recreates descendants beneath it; editing stays active.
 - Pasting onto a writing card that already has content or children creates a new sibling card directly below it and pastes into that new card.
@@ -246,10 +246,9 @@ Up/down follows the packed spatial column, even across different parent groups. 
 
 - Type → enter edit mode and insert the typed character
 - Enter → edit mode
-- Escape → navigation mode
-- Escape on an empty leaf card → delete the empty card and return to the most recently visited surviving card in navigation mode; without visit history, prefer its parent, then the usual spatial fallback
+- Escape → return to the open file in the directory. Leaving an empty leaf discards it. The most recently visited surviving card, then its parent, then the spatial fallback determines the selection on return to Tree.
 - Backspace on an empty card → delete card
-- Backspace on an empty leaf card → delete the empty card and return to the most recently visited surviving card in editing mode; without visit history, prefer its parent, then the usual spatial fallback
+- Backspace on an empty leaf card → delete it and continue editing the most recently visited surviving card. With no visit history, prefer its parent, then the spatial fallback. Deleting the final card shows the empty Tree pane.
 - Backspace from a trailing empty line removes that line immediately and returns to the previous line
 - ArrowDown at the end of a card opens the card below in edit mode at the start of that card
 - ArrowUp at the start of a card opens the card above in edit mode at the end of that card
@@ -298,15 +297,14 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - overview centers child groups around their parent where possible, while keeping adjacent child sibling centers no more than 200px apart
 - overview uses the same fixed zoom level regardless of which card opened it; navigating between cards does not rescale the overview
 - trackpad / wheel gestures do not trigger overview; once overview is open they pan the structural graph without changing the selected card
-- Three view modes are available: **Wide Lens**, **Normal**, and **Focused**. Normal uses the responsive writing columns above. Focused shows the selected full-content card and its same-parent siblings above and below in one horizontally centered column, up to 880px wide with at least 24px side margins. Cards belonging to other parents, ancestors, children, and the empty-child target stay hidden. Root cards count as siblings of one another.
-- Cmd/Ctrl++ (or =) and Window > Zoom In step Wide Lens → Normal → Focused; Cmd/Ctrl+- and Window > Zoom Out step back. Stop at either end. The command palette and Window menu also offer all three named views directly. Enter in Wide Lens returns to Normal in navigation mode.
-- Focused displays subtle, non-interactive chevrons at the top, bottom, left, and right viewport edges only where card navigation has a destination. Up/Down follow packed-column navigation, Left indicates the parent (or document context at the root), and Right indicates the remembered or first child. Use the same light, theme-aware neutral color as the unselected graph lines. Hints stay fixed while the frame pans and are hidden in Normal, Wide Lens, and directory views.
-- Focused retains tree navigation, card editing, autosave, shared-frame panning, long-card top placement and caret reveal. Selecting a different card keeps Focused active. Switching views resets pan and returns to navigation mode, preserving the selected card and child memory; new documents start in Normal. Directory cards retain their existing sizing and arrangement. Normal continues to respect the existing Neighbor Cards preference; Focused shows same-parent siblings independently of that preference.
+- Tree has three writing sizes. Compact uses 85% of the configured text size and line height, fits up to four columns using a 272px target minimum, and caps cards at 352px. Normal uses the responsive columns described above and the configured typography. Large uses 125% typography and a single centered column capped at 880px. The selected card and its siblings share that column when Neighbor Cards is enabled. Each size fits the available pane width, with 24px side margins or more.
+- Cmd/Ctrl+= or + zooms in and Cmd/Ctrl+- zooms out. Window > Zoom In and Zoom Out follow the same order. Tree steps through Wide Lens → Compact → Normal → Large. Manuscript steps through Compact → Normal → Large with prose widths capped at 612px, 720px, and 900px and the same typography ratios as Tree. Zoom applies to the active pane and stops at either end. Window and the command palette offer direct Tree view choices. Enter in Wide Lens opens Normal in navigation mode.
+- Both panes start at Normal when opening a document and remember their own zoom as the writer switches panes or resizes the window. Tree zoom preserves the selected card, child memory, and keyboard destinations at every size. Tree writing sizes preserve the active editor and selection while resetting shared pan and revealing the caret when needed. Entering or leaving Wide Lens returns Tree to navigation mode. Manuscript zoom keeps the editor and selection in place and reflows the passage margin bars. Directory cards keep their existing sizing and arrangement.
 - overview may leave distant parts of the tree outside the viewport when the centered structural map is larger than the window
 - returning from overview restores the normal rich-card spacing without temporarily packing long neighboring cards as minimum-height cards
 - overview titles are derived from the first non-empty line of each card's existing content; cards still do not have separate persisted titles
 - clicking a card in overview selects it as the return target without entering text editing
-- in Normal and Focused, unselected cards keep the same text and surface color, but render without visible outline or shadow
+- at all Tree writing sizes, unselected cards keep the same text and surface color, but render without visible outline or shadow
 - dark theme cards use lighter box surfaces instead of shadows; the selected editing card becomes lighter again
 - dark theme card number labels use a light token so labels such as `A01` remain visible
 - immediate parent aligns vertically with the active card
@@ -344,7 +342,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
 - focused cards do not resize just because they are selected
 - focused and unfocused cards keep the same footprint
 - only the currently selected card shows elevated shadow treatment
-- in Normal and Focused, unselected cards have no visible outline or shadow
+- at all Tree writing sizes, unselected cards have no visible outline or shadow
 - when a selected card is taller than the window, navigation mode keeps the card top and title visible while the body overflows below the viewport
 - Entering edit mode alone preserves placement. Only manual panning or revealing a caret/selection further down may move the card start above the viewport. Caret movement and typing pan the whole frame only enough to keep the selection head visible; resizing while editing also preserves caret visibility. The usable top/bottom inset is 48px.
 - cards only grow when content adds lines
@@ -359,7 +357,7 @@ Up/down follows the packed spatial column, even across different parent groups. 
   - enter edit mode
   - cursor placed near click
 - trackpad / wheel gestures pan the entire bounded normal stage and the overview graph without showing scrollbars. Manual pan persists until selecting a card by click or keyboard restores its structured arrangement; typing and caret movement only pan as needed to reveal the selection.
-- Cmd/Ctrl+- and Cmd/Ctrl++ step between Wide Lens, Normal, and Focused; wheel/trackpad gestures only pan the current view
+- Keyboard and Window zoom apply to the active pane. Wheel and trackpad gestures pan the Tree or scroll the Manuscript.
 
 ### Animation
 
@@ -417,8 +415,9 @@ Structure:
 View:
 
 - Wide Lens
+- Compact
 - Normal
-- Focused
+- Large
 
 Integrations:
 
@@ -491,9 +490,12 @@ Import and export should appear together as a grouped block.
 ### Window
 
 - Reload
+- Zoom In
+- Zoom Out
 - Wide Lens
+- Compact
 - Normal
-- Focused
+- Large
 - Minimize
 - Toggle Full Screen
 
@@ -572,6 +574,8 @@ Rules:
 - autosave only; Cmd/Ctrl+S force-flushes pending autosave work without introducing a visible save button
 - opening or creating another document force-flushes dirty changes in the current document before the active document changes
 - when the open `.fable` file changes externally, the workspace refreshes once local edits are no longer dirty
+- opening a document in a newer file format prompts the user to update Fablecraft and leaves the active document in place
+- if another build upgrades the open file before pending edits can be saved, autosave pauses and the user can save those edits in a separate copy
 
 ---
 
@@ -599,11 +603,14 @@ New document from tree:
 ## 15. AI / MCP
 
 - app exposes structure through a local MCP tool surface
-- read tools: open documents, document, card, subtree
+- read tools: open documents, document, card, subtree, manuscript
 - local Claude-compatible stdio MCP server is available for external tool use
-- mutation tools: set card text, create child, create sibling before, create sibling after, move card before/after another card, wrap level from a card-id list, delete card
+- mutation tools: set card text, create child, create sibling before, create sibling after, move card before/after another card, wrap level from a card-id list, delete card, edit manuscript
 - desktop app writes a local open-document session file so external MCP clients can discover active `.fable` paths; the response may include multiple paths for multiple app instances or future tab/window surfaces
 - `get_document` includes structural tree depth counts, for example `[1, 4, 7, 32]` for card counts by depth from root outward
+- `get_document` includes the saved revision and manuscript word and character counts. An absent manuscript has null metadata. Word counts use whitespace-separated text and character counts use UTF-16 code units.
+- `get_manuscript` can read plain text by an inclusive start and exclusive end character offset. Each page provides the editor ranges for its text blocks and the passage links touching them. Clients can pin reads to the saved revision and use the continuation offset for large ranges. Omitting the range reads the full rich manuscript.
+- `edit_manuscript` can insert, replace, or delete text within one text block using the same character offsets and the revision from a read. Edits preserve formatting outside the edited range and use the manuscript passage-link mapping rules. Rich-text edits use editor positions and rich nodes.
 - `get_card` includes ordered direct child card ids when present
 - external MCP writes should appear in the open document without manually reopening it
 - `set_card_text` converts Markdown heading lines such as `# Title`, `## Section`, and `### Beat` into rendered card headings while leaving other Markdown syntax as ordinary text
@@ -724,9 +731,7 @@ Editing behavior:
 - A newly created document should open directly into edit mode on the first card.
 - The editing placeholder copy should read `Your story starts here` on the first card only, not on later root-level cards.
 - Empty non-first cards should render a muted italic `empty card` placeholder after the user leaves editing with no content; the placeholder is visual only and disappears as soon as the user starts typing.
-- Escape or in-editor arrow navigation away from an empty card should remove that abandoned card, including root-level cards, unless it is the final remaining card in the whole tree.
-- Backspace should delete an empty root-level card when other cards still exist; only the final remaining card in the whole tree is protected, and deleting it clears its content.
-- On the final remaining card, `Escape` should not leave edit mode while the card is still empty.
+- Escape or in-editor arrow navigation away from an empty leaf removes the abandoned card. Escape or Backspace on the final empty card can leave an empty tree.
 
 ### Document Trash cleanup
 
@@ -739,9 +744,9 @@ Editing behavior:
 
 A .fable document can contain one continuous rich-text manuscript alongside its idea tree. Its reading order is independent of cards. [Manuscript v1 specification](manuscript_v1_proposal.md)
 
-- **Workspace.** Show Tree, Show Both, and Show Manuscript are available in Window and the command palette. Both keeps Tree on the left and Manuscript on the right, with a single-line divider that responds to pointer and keyboard resizing. Dragging the divider preserves pane focus and text selection. Manuscript keeps at least 32 px of space on each side at split-capable widths and 24 px in narrow windows. Below the split breakpoint, the active pane fills the window and Show Both indicates that more width is needed. Widening restores the requested split unless the writer explicitly chooses a single pane. The requested layout and divider ratio are local per-document preferences. Pane changes preserve the editors, their selections, and scroll state during the session. In Both, the selected Tree card keeps its place while Manuscript has focus and regains its active styling when Tree regains focus. Tree zoom remains specific to Tree.
+- **Workspace.** Show Tree, Show Both, and Show Manuscript are available in Window and the command palette. Both keeps Tree on the left and Manuscript on the right, with a single-line divider that responds to pointer and keyboard resizing. Dragging the divider preserves pane focus and text selection. Manuscript keeps at least 32 px of space on each side at split-capable widths and 24 px in narrow windows. Below the split breakpoint, the active pane fills the window and Show Both indicates that more width is needed. Widening restores the requested split unless the writer explicitly chooses a single pane. The requested layout, last active pane, and divider ratio are local per-document preferences, including when the manuscript is blank. Pane changes preserve the editors, their selections, and scroll state during the session. In Both, the selected Tree card keeps its place while Manuscript has focus and regains its active styling when Tree regains focus. Tree and Manuscript retain their own writing sizes as focus changes.
 - **Keyboard.** Use Cmd+Option+Left/Right on macOS and Ctrl+Alt+Left/Right on Windows and Linux. At split widths, the first step reveals and focuses the other pane. A second step in the same direction opens that pane alone. Below the breakpoint, each direction opens its destination directly. The shortcuts ignore repeats and composition. Focus Pane Left and Right also appear in Window and the palette. Cmd/Ctrl+F searches the active pane.
-- **Creation and editing.** Entering an empty Manuscript pane focuses a blank editor. The first edit creates the manuscript in one undo step. Write Manuscript explicitly creates and focuses an empty manuscript. Import Manuscript Markdown remains available from File and the command palette. Navigation-mode card copy pastes the card's own formatted prose in the manuscript. Chips become label text. The manuscript uses the card prose schema and normal rich-text editing. Use cut and paste to rearrange prose. Remove Manuscript confirms removal and returns to Tree. Undo restores the manuscript with its passage links. Undo is chronological across both panes once a manuscript is part of the document session.
+- **Creation and editing.** Entering an empty Manuscript pane focuses a blank editor. The first edit creates the manuscript in one undo step. Write Manuscript explicitly creates and focuses an empty manuscript. Import Manuscript Markdown remains available from File and the command palette. Navigation-mode card copy pastes the card's own formatted prose in the manuscript. Chips become label text. The manuscript uses the card prose schema and normal rich-text editing. Use cut and paste to rearrange prose. Clearing the prose leaves an empty manuscript in place and clears its passage links. Undo restores both the prose and links. Undo is chronological across both panes once a manuscript is part of the document session.
 - **Passage links.** Control+L on selected manuscript prose focuses Tree. Navigate as usual or click an idea card, then press Enter to link the selected card. Enter returns focus to the passage with the caret at its start. Escape cancels and restores the selection. Typing an existing card ID such as `#B02` links the whole manuscript paragraph and consumes the ID. In Both, its card becomes active as soon as the ID is accepted. A tag on a blank line shows the margin bar immediately, and the first prose in that paragraph persists the link. The linked range grows as the writer continues the paragraph and ends when Enter starts the next one. A thick grey line in the left margin marks the linked lines and adjusts when the text wraps. Each character can link to one card. A new link replaces the target wherever the ranges intersect and preserves older links outside that range. In Both, a manuscript selection touching a passage activates its linked card in Tree while the manuscript keeps keyboard focus. A selection spanning separate links activates the first linked card in reading order. Card footers show backlinks in reading order and each entry places the caret at the start of its passage, including in aliases and Wide Lens. The × beside a backlink removes that association in one undoable step and keeps the prose. Logical line labels follow paragraph and hard-break structure and remain stable when prose wraps differently.
 - **Revision.** Text edits map ranges with the prose. Pure deletion removes a passage when no linked text survives. A whole-span replacement keeps its targets. The first successful paste of a cut in its source manuscript carries linked fragments and retains the identity of fully moved passages. Later pastes, copy, and cross-document paste insert independent prose. Deleted targets are pruned without affecting other targets. Undo and redo include the links each edit changed.
 - **Files.** File and the palette expose separate Import and Export Manuscript Markdown commands. Import reads and validates UTF-8, confirms replacement and loss of existing links, and is undoable in one step. Export writes the whole current prose with a suggested ` - Manuscript.md` suffix. Markdown carries supported rich formatting and regular URLs. Passage IDs and card associations remain in the .fable file.

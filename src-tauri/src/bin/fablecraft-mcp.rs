@@ -189,7 +189,10 @@ fn scoped_request_fields(
     arguments: &mut Map<String, Value>,
 ) -> Result<(&'static str, Option<String>), String> {
     match name {
-        TOOL_GET_OPEN_DOCUMENTS | TOOL_GET_DOCUMENT | TOOL_GET_MANUSCRIPT | TOOL_EDIT_MANUSCRIPT => Ok(("document", None)),
+        TOOL_GET_OPEN_DOCUMENTS
+        | TOOL_GET_DOCUMENT
+        | TOOL_GET_MANUSCRIPT
+        | TOOL_EDIT_MANUSCRIPT => Ok(("document", None)),
         TOOL_GET_CARD | TOOL_SET_CARD_TEXT => {
             Ok(("card", Some(extract_required_string(arguments, "cardId")?)))
         }
@@ -232,7 +235,7 @@ fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             TOOL_GET_DOCUMENT,
-            "Read document metadata and discover the root card id for a .fable document.",
+            "Read document metadata, including the root card ID, revision ID and manuscript word and character counts.",
             object_schema(
                 &[(
                     "documentPath",
@@ -243,25 +246,21 @@ fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             TOOL_GET_MANUSCRIPT,
-            "Read rich-text manuscript, passage ranges and its current revision ID.",
+            "Read a half-open UTF-16 plain-text range with passage links and editor positions. Use nextStartChar to continue and revisionId to detect changes. Omit the range for the full rich-text manuscript.",
             object_schema(
-                &[("documentPath", path_schema("Absolute path to a .fable document."))],
+                &[
+                    ("documentPath", path_schema("Absolute path to a .fable document.")),
+                    ("revisionId", string_schema("Optional revision from get_document or a previous read.")),
+                    ("startChar", offset_schema("Inclusive plain-text offset.")),
+                    ("endChar", offset_schema("Exclusive plain-text offset.")),
+                ],
                 &["documentPath"],
             ),
         ),
         tool(
             TOOL_EDIT_MANUSCRIPT,
-            "Replace a half-open ProseMirror range (UTF-16) within one textblock or at sibling block boundaries. Preserve mapped links. Read the revision before editing.",
-            object_schema(
-                &[
-                    ("documentPath", path_schema("Absolute path to a .fable document.")),
-                    ("baseRevisionId", json!({ "type": "string" })),
-                    ("from", json!({ "type": "integer", "minimum": 0 })),
-                    ("to", json!({ "type": "integer", "minimum": 0 })),
-                    ("insert", json!({ "type": "array", "items": { "type": "object" }, "description": "Closed rich-text JSON nodes to insert. An empty array deletes." })),
-                ],
-                &["documentPath", "baseRevisionId", "from", "to", "insert"],
-            ),
+            "Edit one text block using the same half-open UTF-16 character range as get_manuscript, or supply ProseMirror positions and rich nodes. Both forms require the base revision and preserve mapped links.",
+            edit_manuscript_schema(),
         ),
         tool(
             TOOL_GET_CARD,
@@ -427,6 +426,46 @@ fn tool(name: &str, description: &str, input_schema: Value) -> Value {
     })
 }
 
+fn edit_manuscript_schema() -> Value {
+    let mut schema = object_schema(
+        &[
+            (
+                "documentPath",
+                path_schema("Absolute path to a .fable document."),
+            ),
+            (
+                "baseRevisionId",
+                string_schema("Revision ID from a manuscript read."),
+            ),
+            ("startChar", offset_schema("Inclusive plain-text offset.")),
+            ("endChar", offset_schema("Exclusive plain-text offset.")),
+            (
+                "replacementText",
+                string_schema("Plain text without line breaks. An empty string deletes."),
+            ),
+            ("from", offset_schema("Inclusive ProseMirror position.")),
+            ("to", offset_schema("Exclusive ProseMirror position.")),
+            (
+                "insert",
+                json!({
+                    "type": "array", "items": { "type": "object" },
+                    "description": "Closed rich-text JSON nodes to insert. An empty array deletes."
+                }),
+            ),
+        ],
+        &["documentPath", "baseRevisionId"],
+    );
+    schema["oneOf"] = json!([
+        { "required": ["startChar", "endChar", "replacementText"] },
+        { "required": ["from", "to", "insert"] }
+    ]);
+    schema
+}
+
+fn offset_schema(description: &str) -> Value {
+    json!({ "type": "integer", "minimum": 0, "description": description })
+}
+
 fn object_schema(properties: &[(&str, Value)], required: &[&str]) -> Value {
     let mut props = Map::new();
 
@@ -484,6 +523,7 @@ mod tests {
 
     use super::*;
     use fablecraft_lib::mcp::invoke_mcp_tool_for_path;
+    use fablecraft_lib::storage::{DocumentRepository, EditableDocumentSnapshot};
 
     fn temp_document_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!("fablecraft-stdio-{label}-{}.fable", Uuid::new_v4()))
@@ -573,5 +613,258 @@ mod tests {
             .contains("Loaded document metadata."));
 
         fs::remove_file(path).expect("temp file should be removable");
+    }
+
+    fn call_tool(path: &PathBuf, name: &str, mut arguments: Value) -> Value {
+        arguments["documentPath"] = json!(path);
+        handle_request(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        }))
+        .unwrap()["result"]["structuredContent"]
+            .clone()
+    }
+
+    #[test]
+    fn manuscript_character_ranges_share_editor_coordinates_and_check_revisions() {
+        let path = temp_document_path("manuscript-range");
+        DocumentRepository::create(path.clone()).unwrap();
+        let initial = DocumentRepository::load(path.clone()).unwrap();
+        let root = &initial.cards[0].id;
+        let mut editable = EditableDocumentSnapshot::from(&initial);
+        assert_eq!(
+            call_tool(&path, TOOL_GET_DOCUMENT, json!({}))["manuscript"],
+            Value::Null
+        );
+
+        let prose = json!({"type": "doc", "content": [
+            {"type": "heading", "attrs": {"level": 1}, "content": [
+                {"type": "text", "text": "A ", "marks": [{"type": "bold"}]},
+                {"type": "text", "text": "😀"},
+                {"type": "hardBreak"},
+                {"type": "text", "text": "B"}
+            ]},
+            {"type": "horizontalRule"},
+            {"type": "bulletList", "content": [{"type": "listItem", "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "Tail"}]}
+            ]}]}
+        ]});
+        let passage_id = Uuid::new_v4();
+        editable.manuscript = Some(
+            serde_json::from_value(json!({
+                "id": Uuid::new_v4(),
+                "contentJson": prose.to_string(),
+                "passages": [{"id": passage_id, "from": 3, "to": 5, "targetCardIds": [root]}]
+            }))
+            .unwrap(),
+        );
+        let revision = DocumentRepository::save(path.clone(), editable)
+            .unwrap()
+            .revision_id;
+        let metadata = call_tool(&path, TOOL_GET_DOCUMENT, json!({}));
+        assert_eq!(
+            metadata["manuscript"],
+            json!({"wordCount": 4, "characterCount": 11})
+        );
+        assert_eq!(metadata["revisionId"], revision);
+
+        let read = call_tool(
+            &path,
+            TOOL_GET_MANUSCRIPT,
+            json!({
+                "revisionId": revision, "startChar": 2, "endChar": 9
+            }),
+        );
+        assert_eq!(read["text"], "😀\nB\nTa");
+        assert_eq!(read["nextStartChar"], Value::Null);
+        assert_eq!(
+            read["blocks"],
+            json!([
+                {"startChar": 2, "endChar": 6, "from": 3, "to": 7},
+                {"startChar": 7, "endChar": 9, "from": 12, "to": 14}
+            ])
+        );
+        assert_eq!(read["passages"][0]["id"], json!(passage_id));
+
+        for (start, end, replacement) in [(3, 4, "split"), (5, 8, "join"), (2, 4, "new\nline")] {
+            let invalid = call_tool(
+                &path,
+                TOOL_EDIT_MANUSCRIPT,
+                json!({
+                    "baseRevisionId": revision, "startChar": start, "endChar": end, "replacementText": replacement
+                }),
+            );
+            assert_eq!(invalid["code"], "invalid_manuscript");
+        }
+        let edit = json!({"baseRevisionId": revision, "startChar": 2, "endChar": 4, "replacementText": "long"});
+        let updated = call_tool(&path, TOOL_EDIT_MANUSCRIPT, edit.clone());
+        assert_ne!(updated["revisionId"], revision);
+        assert_eq!(
+            call_tool(&path, TOOL_EDIT_MANUSCRIPT, edit)["code"],
+            "stale_document_revision"
+        );
+        assert_eq!(
+            call_tool(
+                &path,
+                TOOL_GET_MANUSCRIPT,
+                json!({
+                    "revisionId": revision, "startChar": 0, "endChar": 1
+                })
+            )["code"],
+            "stale_document_revision"
+        );
+
+        let full = call_tool(&path, TOOL_GET_MANUSCRIPT, json!({}));
+        let manuscript = &full["manuscript"];
+        let content: Value =
+            serde_json::from_str(manuscript["contentJson"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            content["content"][0]["content"][0]["marks"],
+            json!([{"type":"bold"}])
+        );
+        assert_eq!(content["content"][0]["content"][1]["text"], "long");
+        assert_eq!(
+            manuscript["passages"][0],
+            json!({
+                "id": passage_id, "from": 3, "to": 7, "targetCardIds": [root]
+            })
+        );
+        let inserted = call_tool(
+            &path,
+            TOOL_EDIT_MANUSCRIPT,
+            json!({
+                "baseRevisionId": updated["revisionId"], "startChar": 13, "endChar": 13, "replacementText": "!"
+            }),
+        );
+        let deleted = call_tool(
+            &path,
+            TOOL_EDIT_MANUSCRIPT,
+            json!({
+                "baseRevisionId": inserted["revisionId"], "startChar": 9, "endChar": 13, "replacementText": ""
+            }),
+        );
+        assert_eq!(
+            call_tool(
+                &path,
+                TOOL_GET_MANUSCRIPT,
+                json!({
+                    "revisionId": deleted["revisionId"], "startChar": 9, "endChar": 10
+                })
+            )["text"],
+            "!"
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn manuscript_remains_accessible_after_deleting_the_last_root() {
+        let path = temp_document_path("manuscript-without-cards");
+        DocumentRepository::create(path.clone()).unwrap();
+        let initial = DocumentRepository::load(path.clone()).unwrap();
+        let mut editable = EditableDocumentSnapshot::from(&initial);
+        let content = json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Draft"}]}]
+        });
+        editable.manuscript = Some(
+            serde_json::from_value(json!({
+                "id": Uuid::new_v4(), "contentJson": content.to_string(), "passages": []
+            }))
+            .unwrap(),
+        );
+        DocumentRepository::save(path.clone(), editable).unwrap();
+
+        let deleted = call_tool(
+            &path,
+            TOOL_DELETE_CARD,
+            json!({"cardId": initial.cards[0].id}),
+        );
+        assert_eq!(deleted["status"], "deleted");
+
+        let metadata = call_tool(&path, TOOL_GET_DOCUMENT, json!({}));
+        assert_eq!(metadata["cardCount"], 0);
+        assert_eq!(metadata["rootCardId"], Value::Null);
+        assert_eq!(metadata["treeDepthCounts"], json!([]));
+        assert_eq!(
+            metadata["manuscript"],
+            json!({"wordCount": 1, "characterCount": 5})
+        );
+        let edited = call_tool(
+            &path,
+            TOOL_EDIT_MANUSCRIPT,
+            json!({
+                "baseRevisionId": metadata["revisionId"],
+                "startChar": 0, "endChar": 5, "replacementText": "Prose"
+            }),
+        );
+        assert_ne!(edited["revisionId"], metadata["revisionId"]);
+        let read = call_tool(
+            &path,
+            TOOL_GET_MANUSCRIPT,
+            json!({"revisionId": edited["revisionId"], "startChar": 0, "endChar": 5}),
+        );
+        assert_eq!(read["text"], "Prose");
+        assert!(DocumentRepository::load(path.clone())
+            .unwrap()
+            .cards
+            .is_empty());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn manuscript_pages_reassemble_text_that_exceeds_the_payload_limit() {
+        let path = temp_document_path("manuscript-pages");
+        DocumentRepository::create(path.clone()).unwrap();
+        let mut editable =
+            EditableDocumentSnapshot::from(&DocumentRepository::load(path.clone()).unwrap());
+        let paragraph = "😀 \"".repeat(120);
+        let paragraphs = vec![paragraph; 300];
+        let prose = json!({
+            "type": "doc",
+            "content": paragraphs.iter().map(|text| json!({
+                "type": "paragraph", "content": [{"type": "text", "text": text}]
+            })).collect::<Vec<_>>()
+        });
+        editable.manuscript = Some(
+            serde_json::from_value(json!({
+                "id": Uuid::new_v4(), "contentJson": prose.to_string(), "passages": []
+            }))
+            .unwrap(),
+        );
+        DocumentRepository::save(path.clone(), editable).unwrap();
+        let metadata = call_tool(&path, TOOL_GET_DOCUMENT, json!({}));
+        let end = metadata["manuscript"]["characterCount"].as_u64().unwrap();
+        assert_eq!(
+            call_tool(&path, TOOL_GET_MANUSCRIPT, json!({}))["code"],
+            "mcp_payload_too_large"
+        );
+
+        let mut start = 0;
+        let mut reassembled = String::new();
+        loop {
+            let page = call_tool(
+                &path,
+                TOOL_GET_MANUSCRIPT,
+                json!({
+                    "revisionId": metadata["revisionId"], "startChar": start, "endChar": end
+                }),
+            );
+            let text = page["text"].as_str().unwrap();
+            let actual_end = start + text.encode_utf16().count() as u64;
+            assert_eq!(page["startChar"], start);
+            assert_eq!(page["endChar"], actual_end);
+            assert!(actual_end > start && actual_end <= end);
+            reassembled.push_str(text);
+            if actual_end == end {
+                assert_eq!(page["nextStartChar"], Value::Null);
+                break;
+            }
+            start = page["nextStartChar"].as_u64().unwrap();
+            assert_eq!(start, actual_end);
+        }
+        assert_eq!(reassembled, paragraphs.join("\n"));
+        fs::remove_file(path).unwrap();
     }
 }

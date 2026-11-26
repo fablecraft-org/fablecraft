@@ -86,7 +86,13 @@ Folder-context operations such as deleting a `.fable` document use the desktop c
 
 ### Manuscript ranges
 
-Read `fablecraft_get_manuscript` with `documentPath` to obtain the current manuscript and `revisionId`. It returns an empty manuscript value when the document has none. To edit an existing manuscript, pass its `revisionId` as `baseRevisionId` to `fablecraft_edit_manuscript`. Supply `from` and `to` as ProseMirror positions and `insert` as an array of rich-text nodes. Text offsets count UTF-16 code units. Equal endpoints insert at a position and an empty array deletes the range. A stale revision requires reading the manuscript again before retrying.
+1. Call `fablecraft_get_document` for the saved `revisionId` and `manuscript.wordCount` and `manuscript.characterCount`. The `manuscript` field is null when no manuscript exists. An empty tree returns `rootCardId: null` and still exposes manuscript metadata.
+2. Call `fablecraft_get_manuscript` with `documentPath`, `startChar`, `endChar`, and optionally `revisionId`. The result includes `text`, the actual `startChar` and `endChar`, `blocks` with plain-text and ProseMirror ranges, and the `passages` that intersect those blocks. If `nextStartChar` is present and non-null, use it as the next start and keep the original end and revision. Omit both offsets to get the original full rich manuscript response.
+3. Call `fablecraft_edit_manuscript` with `documentPath`, `baseRevisionId` from the read, `startChar`, `endChar`, and `replacementText`. Equal endpoints insert and an empty replacement deletes a non-empty range. The plain-text edit must fit one text block, and replacement text cannot contain line breaks. The successful response gives the new `revisionId`. Read again after a stale revision error before recalculating an edit.
+
+Offsets are zero-based UTF-16 code units, with an inclusive start and an exclusive end. Each line break and separator between text blocks counts as one unit. Formatting, list markers, and horizontal rules contribute no characters. Word count is the number of whitespace-separated runs in the same plain text.
+
+For structured edits, pass `baseRevisionId`, ProseMirror positions `from` and `to`, and an `insert` array of rich-text nodes. An empty array deletes that range.
 
 ### Card Text And Headings
 

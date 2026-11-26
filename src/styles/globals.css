@@ -373,7 +373,7 @@ code {
   min-height: min(55vh, 36rem);
   outline: none;
   overflow-wrap: anywhere;
-  font: var(--fc-content-size)/var(--fc-content-line-height) var(--fc-font-content);
+  font: var(--fc-manuscript-content-size)/var(--fc-manuscript-content-line-height) var(--fc-font-content);
 }
 
 .fc-manuscript-panel {

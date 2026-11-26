@@ -16,7 +16,9 @@ pub(super) fn apply(connection: &rusqlite::Connection, index: usize) -> rusqlite
     connection.execute_batch(MIGRATIONS[index])
 }
 
-pub const MIGRATIONS: &[&str] = &[
+// Append one entry for every breaking on-disk change, including JSON payloads.
+// The index plus one is the SQLite user_version checked by older builds.
+pub(super) const MIGRATIONS: &[&str] = &[
     r#"
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,

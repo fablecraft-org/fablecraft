@@ -1,6 +1,7 @@
 import { toEditableDocumentSnapshot } from "../domain/document/serialization";
 import type { SaveDocumentResult } from "../domain/document/types";
 import { useDocumentStore } from "../state/documentStore";
+import { normalizeError } from "./documentResponse";
 import { saveDocumentSnapshotAtPath } from "./documentSnapshots";
 
 let inFlight: { session: number; result: Promise<SaveDocumentResult> } | null = null;
@@ -22,10 +23,11 @@ export function savePendingDocument() {
     } catch (error) {
       const current = useDocumentStore.getState();
       if (current.session === session) {
-        const message = error && typeof error === "object" && "message" in error
-          ? String(error.message) : "Autosave failed unexpectedly.";
-        current.markSaveError(message, Boolean(error && typeof error === "object" &&
-          "code" in error && error.code === "stale_document_revision"));
+        const { code, message } = normalizeError(error);
+        current.markSaveError(
+          message === "Unknown error" ? "Autosave failed unexpectedly." : message,
+          code === "stale_document_revision" || code === "unsupported_document_version",
+        );
       }
       throw error;
     } finally {
